@@ -100,7 +100,7 @@ References:
 
 ### 3.1 MVP features
 
-- Multiple `.gpx` files per upload.
+- Up to 15 `.gpx` files per upload.
 - Drag-and-drop and file-picker input.
 - GPX validation and route summary before rendering.
 - All safe poster options exposed in the UI.
@@ -306,7 +306,7 @@ All limits are configurable through environment variables, with these defaults:
 
 | Limit | Default |
 | --- | ---: |
-| Files per upload | 20 |
+| Files per upload | 15 (hard maximum) |
 | Individual file size | 25 MiB |
 | Total upload size | 100 MiB |
 | Parsed points per upload | 1,000,000 |
@@ -318,6 +318,8 @@ All limits are configurable through environment variables, with these defaults:
 ### 6.2 Validation
 
 - Stream each `UploadFile` into the job workspace.
+- Reject uploads containing more than 15 files. Configuration may lower this
+  limit but must never raise it above 15.
 - Do not trust the supplied filename or MIME type.
 - Generate server-side filenames.
 - Require a `.gpx` suffix for user feedback, then validate XML content.
@@ -386,7 +388,7 @@ It never returns provider credentials.
 #### `POST /api/uploads`
 
 Content type: `multipart/form-data`  
-Field: repeated `files`
+Field: repeated `files`, with a maximum of 15 GPX files
 
 Response: `201 Created`
 
@@ -705,7 +707,7 @@ TLS reverse proxy in front of the application for network access.
 | `OMP_JOB_ROOT` | Temporary workspace root |
 | `OMP_CACHE_ROOT` | Persistent tile cache |
 | `OMP_JOB_TTL_SECONDS` | Upload/result lifetime |
-| `OMP_MAX_FILES` | Files per upload |
+| `OMP_MAX_FILES` | Files per upload, constrained to 1–15 |
 | `OMP_MAX_FILE_BYTES` | Individual file limit |
 | `OMP_MAX_UPLOAD_BYTES` | Aggregate limit |
 | `OMP_MAX_POINTS` | Aggregate parsed point limit |
