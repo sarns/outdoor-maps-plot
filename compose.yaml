@@ -3,8 +3,9 @@ services:
     build:
       context: .
     ports:
-      - "8088:8000"
+      - "192.168.1.22:8088:8000"
     environment:
+      FORWARDED_ALLOW_IPS: "*"
       OMP_JOB_ROOT: /tmp/poster-jobs
       OMP_CACHE_ROOT: /var/cache/outdoor-maps-plot
       TMPDIR: /tmp/poster-jobs
