@@ -12,9 +12,11 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-import pymupdf
+import pypdfium2 as pdfium
 from PIL import Image, ImageEnhance, ImageOps, UnidentifiedImageError
+from pydantic import ValidationError
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A0, A1, A2, A3, A4, A5, LEGAL, LETTER, TABLOID
 from reportlab.lib.units import inch, mm
@@ -22,6 +24,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen.canvas import Canvas
 
 from outdoor_maps_plot.gpx import Point, Route
+from outdoor_maps_plot.options import PosterConfig
 from outdoor_maps_plot.styles import ATTRIBUTIONS, STYLES, Style
 
 PAGE_SIZES = {
@@ -36,6 +39,9 @@ PAGE_SIZES = {
     "TABLOID": TABLOID,
 }
 OUTPUT_FORMATS = {"pdf": ".pdf", "png": ".png", "jpeg": ".jpg", "jpg": ".jpg"}
+RenderPhaseName = Literal["fetching_map", "drawing", "rasterizing"]
+RenderProgress = Callable[[RenderPhaseName, int, str], None]
+CancellationCheck = Callable[[], None]
 
 
 class PosterError(ValueError):
@@ -44,6 +50,8 @@ class PosterError(ValueError):
 
 @dataclass(frozen=True)
 class PosterOptions:
+    """Legacy CLI adapter; new integrations should construct :class:`PosterConfig`."""
+
     title: str = "My GPX Adventure"
     subtitle: str = ""
     paper_size: str = "A3"
@@ -59,6 +67,41 @@ class PosterOptions:
     route_width: float = 3.5
     dpi: int = 300
     jpeg_quality: int = 92
+
+    def to_config(self, output_format: str = "pdf") -> PosterConfig:
+        return PosterConfig(
+            title=self.title,
+            subtitle=self.subtitle,
+            paper_size=self.paper_size,
+            orientation=self.orientation,
+            style_name=self.style_name,
+            provider=self.provider,
+            zoom=self.zoom,
+            padding_percent=self.padding * 100,
+            margin_mm=self.margin_mm,
+            basemap_width=self.basemap_width,
+            max_tiles=self.max_tiles,
+            simplify_points=self.simplify_points,
+            route_width=self.route_width,
+            output_format="jpeg" if output_format == "jpg" else output_format,
+            dpi=self.dpi,
+            jpeg_quality=self.jpeg_quality,
+        )
+
+
+def _emit_progress(
+    progress: RenderProgress | None,
+    phase: RenderPhaseName,
+    percent: int,
+    message: str,
+) -> None:
+    if progress is not None:
+        progress(phase, percent, message)
+
+
+def _check_cancellation(check: CancellationCheck | None) -> None:
+    if check is not None:
+        check()
 
 
 def parse_page_size(value: str) -> tuple[float, float]:
@@ -194,7 +237,13 @@ def _fit_bounds(
     return left, top, right, bottom
 
 
-def _download_tile(url: str, path: Path) -> None:
+def _download_tile(
+    url: str,
+    path: Path,
+    *,
+    cancellation_check: CancellationCheck | None = None,
+) -> None:
+    _check_cancellation(cancellation_check)
     path.parent.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(
         url,
@@ -202,12 +251,17 @@ def _download_tile(url: str, path: Path) -> None:
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            path.write_bytes(response.read())
-    except (OSError, urllib.error.HTTPError) as exc:
+            data = bytearray()
+            while chunk := response.read(64 * 1024):
+                _check_cancellation(cancellation_check)
+                data.extend(chunk)
+            _check_cancellation(cancellation_check)
+            path.write_bytes(data)
+    except (OSError, urllib.error.HTTPError):
         raise PosterError(
-            f"Could not download map tile {url}: {exc}. "
-            "Check the connection, provider credentials, and tile usage policy."
-        ) from exc
+            "Could not download a map tile. Check the connection, provider "
+            "credentials, and tile usage policy."
+        ) from None
 
 
 def make_basemap(
@@ -220,6 +274,9 @@ def make_basemap(
     padding: float,
     basemap_width: int,
     max_tiles: int,
+    *,
+    progress: RenderProgress | None = None,
+    cancellation_check: CancellationCheck | None = None,
 ) -> tuple[Path, tuple[float, float, float, float]]:
     """Download, stitch, crop, and style a tile mosaic around the routes."""
     if provider == "opentopo" and zoom > 17:
@@ -241,6 +298,8 @@ def make_basemap(
     ).hexdigest()[:16]
     output = cache / "basemaps" / f"{cache_key}.png"
     if output.exists():
+        _check_cancellation(cancellation_check)
+        _emit_progress(progress, "fetching_map", 54, "Topographic map ready")
         return output, bounds
 
     tile_dir = cache / "tiles" / provider
@@ -249,11 +308,18 @@ def make_basemap(
         ((x1 - x0 + 1) * 256, (y1 - y0 + 1) * 256),
         "#e8e5dc",
     )
+    completed_tiles = 0
+    last_percent = -1
     for tile_y in range(y0, y1 + 1):
         for tile_x in range(x0, x1 + 1):
+            _check_cancellation(cancellation_check)
             tile_path = tile_dir / str(zoom) / str(tile_x) / f"{tile_y}.png"
             if not tile_path.exists():
-                _download_tile(_tile_url(provider, zoom, tile_x, tile_y), tile_path)
+                _download_tile(
+                    _tile_url(provider, zoom, tile_x, tile_y),
+                    tile_path,
+                    cancellation_check=cancellation_check,
+                )
             try:
                 with Image.open(tile_path) as tile:
                     mosaic.paste(
@@ -262,10 +328,15 @@ def make_basemap(
                     )
             except (OSError, UnidentifiedImageError) as exc:
                 raise PosterError(
-                    f"Cached map tile is not a valid image: {tile_path}. "
-                    "Remove that tile and run the command again."
+                    "A cached map tile is not a valid image. Clear the tile cache and render again."
                 ) from exc
+            completed_tiles += 1
+            percent = 18 + round(completed_tiles / tile_count * 34)
+            if percent != last_percent:
+                _emit_progress(progress, "fetching_map", percent, "Preparing topographic map")
+                last_percent = percent
 
+    _check_cancellation(cancellation_check)
     crop = (
         round(left - x0 * 256),
         round(top - y0 * 256),
@@ -273,6 +344,7 @@ def make_basemap(
         round(bottom - y0 * 256),
     )
     basemap = mosaic.crop(crop)
+    _check_cancellation(cancellation_check)
     if basemap.width < basemap_width:
         factor = basemap_width / basemap.width
         basemap = basemap.resize(
@@ -282,6 +354,7 @@ def make_basemap(
     basemap = _recolor_basemap(basemap, style_name)
     output.parent.mkdir(parents=True, exist_ok=True)
     basemap.save(output, optimize=True)
+    _emit_progress(progress, "fetching_map", 54, "Topographic map ready")
     return output, bounds
 
 
@@ -297,14 +370,22 @@ def _point_segment_distance_sq(point: Point, start: Point, end: Point) -> float:
     return (point[0] - nearest[0]) ** 2 + (point[1] - nearest[1]) ** 2
 
 
-def simplify_line(points: list[Point], tolerance: float) -> list[Point]:
+def simplify_line(
+    points: list[Point],
+    tolerance: float,
+    cancellation_check: CancellationCheck | None = None,
+) -> list[Point]:
     """Simplify a projected line using iterative Ramer-Douglas-Peucker."""
     if len(points) <= 2 or tolerance <= 0:
         return points
     keep = {0, len(points) - 1}
     stack = [(0, len(points) - 1)]
     tolerance_sq = tolerance**2
+    iterations = 0
     while stack:
+        if iterations % 128 == 0:
+            _check_cancellation(cancellation_check)
+        iterations += 1
         start, end = stack.pop()
         furthest_index = -1
         furthest_distance = 0.0
@@ -348,24 +429,42 @@ def _draw_route_paths(
     routes: list[Route],
     project: Callable[[Point], Point],
     tolerance: float,
+    cancellation_check: CancellationCheck | None = None,
 ) -> None:
     for route in routes:
+        _check_cancellation(cancellation_check)
         for segment in route.segments:
-            projected = simplify_line([project(point) for point in segment], tolerance)
+            _check_cancellation(cancellation_check)
+            projected = simplify_line(
+                [project(point) for point in segment],
+                tolerance,
+                cancellation_check,
+            )
             path = canvas.beginPath()
             for index, (x, y) in enumerate(projected):
                 (path.moveTo if index == 0 else path.lineTo)(x, y)
             canvas.drawPath(path, stroke=1, fill=0)
 
 
-def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterOptions) -> None:
-    style: Style = STYLES[options.style_name]
-    provider = options.provider or style.provider
-    page_w, page_h = oriented_page_size(options.paper_size, options.orientation)
-    reference_w, reference_h = oriented_page_size("A3", options.orientation)
+def _render_pdf(
+    routes: list[Route],
+    output: Path,
+    cache: Path,
+    config: PosterConfig,
+    *,
+    progress: RenderProgress | None = None,
+    cancellation_check: CancellationCheck | None = None,
+) -> None:
+    _check_cancellation(cancellation_check)
+    if not routes:
+        raise PosterError("At least one usable route is required")
+    style: Style = STYLES[config.style_name]
+    provider = config.effective_provider
+    page_w, page_h = oriented_page_size(config.paper_size, config.orientation)
+    reference_w, reference_h = oriented_page_size("A3", config.orientation)
     scale = min(page_w / reference_w, page_h / reference_h)
-    margin = options.margin_mm * mm
-    columns = min(len(routes), 4 if options.orientation == "portrait" else 7)
+    margin = config.margin_mm * mm
+    columns = min(len(routes), 4 if config.orientation == "portrait" else 7)
     rows = math.ceil(len(routes) / columns)
     footer_h = max(70 * scale, (19 + rows * 51) * scale)
     header_h = 104 * scale
@@ -384,24 +483,28 @@ def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterO
         all_points,
         map_w / map_h,
         cache,
-        options.style_name,
+        config.style_name,
         provider,
-        options.zoom,
-        options.padding,
-        options.basemap_width,
-        options.max_tiles,
+        config.zoom,
+        config.padding_percent / 100,
+        config.basemap_width,
+        config.max_tiles,
+        progress=progress,
+        cancellation_check=cancellation_check,
     )
+    _check_cancellation(cancellation_check)
+    _emit_progress(progress, "drawing", 57, "Drawing poster")
     pixel_left, pixel_top, pixel_right, pixel_bottom = bounds
 
     def project(point: Point) -> Point:
-        pixel_x, pixel_y = world_pixel(point, options.zoom)
+        pixel_x, pixel_y = world_pixel(point, config.zoom)
         return (
             map_x + (pixel_x - pixel_left) / (pixel_right - pixel_left) * map_w,
             map_y + (pixel_bottom - pixel_y) / (pixel_bottom - pixel_top) * map_h,
         )
 
     canvas = Canvas(str(output), pagesize=(page_w, page_h), pageCompression=1)
-    canvas.setTitle(options.title)
+    canvas.setTitle(config.title)
     canvas.setAuthor("outdoor-maps-plot")
     canvas.setFillColor(HexColor(style.paper))
     canvas.rect(0, 0, page_w, page_h, fill=1, stroke=0)
@@ -422,13 +525,26 @@ def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterO
     canvas.setLineCap(1)
     canvas.setLineJoin(1)
     canvas.setStrokeColor(HexColor(style.halo))
-    canvas.setLineWidth((options.route_width + 3.5) * scale)
-    _draw_route_paths(canvas, routes, project, options.simplify_points * scale)
+    canvas.setLineWidth((config.route_width + 3.5) * scale)
+    _draw_route_paths(
+        canvas,
+        routes,
+        project,
+        config.simplify_points * scale,
+        cancellation_check,
+    )
     canvas.setStrokeColor(HexColor(style.route))
-    canvas.setLineWidth(options.route_width * scale)
-    _draw_route_paths(canvas, routes, project, options.simplify_points * scale)
+    canvas.setLineWidth(config.route_width * scale)
+    _draw_route_paths(
+        canvas,
+        routes,
+        project,
+        config.simplify_points * scale,
+        cancellation_check,
+    )
 
     for route in routes:
+        _check_cancellation(cancellation_check)
         for point in (route.start, route.end):
             x, y = project(point)
             canvas.setFillColor(HexColor(style.halo))
@@ -437,7 +553,8 @@ def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterO
             canvas.circle(x, y, 2.35 * scale, fill=1, stroke=0)
     canvas.restoreState()
 
-    title = options.title.upper()
+    _emit_progress(progress, "drawing", 72, "Adding poster details")
+    title = config.title.upper()
     title_size = _fit_text_size(
         canvas, title, "Helvetica-Bold", 31 * scale, 14 * scale, page_w * 0.58
     )
@@ -448,7 +565,7 @@ def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterO
     canvas.setFillColor(HexColor(style.muted))
     subtitle = _truncate_text(
         canvas,
-        options.subtitle.upper(),
+        config.subtitle.upper(),
         "Helvetica",
         10 * scale,
         page_w - 2 * margin,
@@ -473,6 +590,7 @@ def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterO
     canvas.line(margin, footer_h + 16 * scale, page_w - margin, footer_h + 16 * scale)
     column_width = (page_w - 2 * margin) / columns
     for index, route in enumerate(routes):
+        _check_cancellation(cancellation_check)
         column, row = index % columns, index // columns
         x = margin + column * column_width
         y = footer_h - 2 * scale - row * 51 * scale
@@ -513,8 +631,10 @@ def _render_pdf(routes: list[Route], output: Path, cache: Path, options: PosterO
         page_w * 0.62,
     )
     canvas.drawRightString(page_w - margin, 22 * scale, attribution)
+    _check_cancellation(cancellation_check)
     canvas.showPage()
     canvas.save()
+    _emit_progress(progress, "drawing", 84, "Poster artwork ready")
 
 
 def create_poster(
@@ -522,27 +642,72 @@ def create_poster(
     output: Path,
     output_format: str,
     cache: Path,
-    options: PosterOptions,
+    options: PosterConfig | PosterOptions,
+    *,
+    progress: RenderProgress | None = None,
+    cancellation_check: CancellationCheck | None = None,
 ) -> None:
     """Create a PDF directly or render the PDF design to a raster image."""
+    try:
+        config = (
+            options.to_config(output_format)
+            if isinstance(options, PosterOptions)
+            else PosterConfig.model_validate(
+                {
+                    **options.model_dump(),
+                    "output_format": "jpeg" if output_format == "jpg" else output_format,
+                }
+            )
+        )
+    except ValidationError as exc:
+        raise PosterError(f"Invalid poster configuration: {exc}") from exc
+    _check_cancellation(cancellation_check)
     output.parent.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
-    if output_format == "pdf":
-        _render_pdf(routes, output, cache, options)
+    if config.output_format == "pdf":
+        _render_pdf(
+            routes,
+            output,
+            cache,
+            config,
+            progress=progress,
+            cancellation_check=cancellation_check,
+        )
         return
 
     with tempfile.TemporaryDirectory(prefix="outdoor-maps-plot-", dir=output.parent) as temp:
         pdf_path = Path(temp) / "poster.pdf"
-        _render_pdf(routes, pdf_path, cache, options)
-        with pymupdf.open(pdf_path) as document:
+        _render_pdf(
+            routes,
+            pdf_path,
+            cache,
+            config,
+            progress=progress,
+            cancellation_check=cancellation_check,
+        )
+        _check_cancellation(cancellation_check)
+        _emit_progress(progress, "rasterizing", 86, "Rasterizing poster")
+        document = pdfium.PdfDocument(pdf_path)
+        try:
             page = document[0]
-            pixmap = page.get_pixmap(dpi=options.dpi, alpha=False)
-            image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
-            save_options: dict[str, object] = {"dpi": (options.dpi, options.dpi)}
-            if output_format == "jpeg":
-                save_options.update(quality=options.jpeg_quality, optimize=True)
-            image.save(
-                output,
-                format="JPEG" if output_format == "jpeg" else "PNG",
-                **save_options,
-            )
+            try:
+                bitmap = page.render(scale=config.dpi / 72)
+                try:
+                    image = bitmap.to_pil().convert("RGB").copy()
+                finally:
+                    bitmap.close()
+            finally:
+                page.close()
+        finally:
+            document.close()
+        _check_cancellation(cancellation_check)
+        save_options: dict[str, object] = {"dpi": (config.dpi, config.dpi)}
+        if config.output_format == "jpeg":
+            save_options.update(quality=config.jpeg_quality, optimize=True)
+        image.save(
+            output,
+            format="JPEG" if config.output_format == "jpeg" else "PNG",
+            **save_options,
+        )
+        _check_cancellation(cancellation_check)
+        _emit_progress(progress, "rasterizing", 94, "Raster poster ready")

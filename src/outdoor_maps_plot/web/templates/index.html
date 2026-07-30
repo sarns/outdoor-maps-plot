@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#18372f">
+    <meta name="csrf-token" content="{{ csrf_token | default('', true) }}">
+    <title>Outdoor Maps Plot</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to poster builder</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Outdoor Maps Plot home">
+        <svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M5 39 18 14l7 12 5-8 13 21H5Z"></path>
+          <path d="m8 36 9-7 7 4 7-6 9 9"></path>
+        </svg>
+        <span>
+          <strong>Outdoor Maps</strong>
+          <small>Plot your adventure</small>
+        </span>
+      </a>
+      <p class="header-note">Private by design · files expire automatically</p>
+    </header>
+
+    <noscript>
+      <p class="noscript">This poster builder needs JavaScript to upload routes and track renders.</p>
+    </noscript>
+
+    <main id="main-content" class="page-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">GPX → PRINT-READY TOPOGRAPHIC ART</p>
+        <h1 id="page-title">Turn the trail into a story.</h1>
+        <p>Upload your route, shape the details, and make a map worth hanging onto.</p>
+      </section>
+
+      <div id="error-panel" class="alert alert--error" role="alert" tabindex="-1" hidden>
+        <div>
+          <strong id="error-title">Something needs attention</strong>
+          <p id="error-message"></p>
+          <ul id="error-details"></ul>
+        </div>
+        <button class="button button--quiet button--small" id="clear-errors" type="button">
+          Clear
+        </button>
+      </div>
+
+      {% include "partials/upload-summary.html" %}
+
+      <div class="builder-grid">
+        {% include "partials/options.html" %}
+
+        <aside class="preview-card card" aria-labelledby="preview-heading">
+          <div class="section-heading">
+            <div class="step-number" aria-hidden="true">3</div>
+            <div>
+              <p class="eyebrow">MAKE IT YOURS</p>
+              <h2 id="preview-heading">Preview</h2>
+            </div>
+          </div>
+
+          <div id="poster-frame" class="poster-frame is-landscape" data-paper="A3">
+            <div id="preview-empty" class="preview-empty">
+              <svg viewBox="0 0 96 96" aria-hidden="true">
+                <path d="m14 75 22-43 12 20 10-15 24 38H14Z"></path>
+                <path d="M17 69c17-13 27-6 39-19 8-8 16-6 25-1"></path>
+              </svg>
+              <strong>Your map preview</strong>
+              <span>Upload a GPX file, then refresh the preview.</span>
+            </div>
+            <img id="preview-image" alt="Generated poster preview" hidden>
+            <span id="preview-stale" class="preview-stale" hidden>Updating preview…</span>
+          </div>
+
+          <p class="preview-meta" id="preview-meta">
+            A3 · Landscape · PDF
+          </p>
+          <button class="button button--secondary button--wide" id="preview-button" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5l2 2m0-5v5h-5M20 12a8 8 0 0 1-14 5l-2-2m0 5v-5h5"></path></svg>
+            Refresh preview
+          </button>
+
+          {% include "partials/progress.html" %}
+          {% include "partials/result.html" %}
+        </aside>
+      </div>
+
+      <section class="final-bar" aria-label="Generate poster">
+        <div>
+          <span class="status-dot" aria-hidden="true"></span>
+          <p><strong id="ready-label">Add routes to begin</strong><span id="ready-detail">Your settings will stay here.</span></p>
+        </div>
+        <button class="button button--primary button--large" id="render-button" type="button" disabled>
+          Generate final poster
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+        </button>
+      </section>
+    </main>
+
+    <footer>
+      <p>Outdoor Maps Plot</p>
+      <p>Map areas are requested from your selected tile provider when rendering.</p>
+    </footer>
+  </body>
+</html>

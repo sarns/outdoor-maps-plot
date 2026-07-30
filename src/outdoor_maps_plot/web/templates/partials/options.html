@@ -1,0 +1,172 @@
+<section class="options-card card" aria-labelledby="options-heading">
+  <div class="section-heading">
+    <div class="step-number" aria-hidden="true">2</div>
+    <div>
+      <p class="eyebrow">SET THE TONE</p>
+      <h2 id="options-heading">Poster options</h2>
+    </div>
+  </div>
+
+  <form id="poster-form" novalidate>
+    <div id="validation-summary" class="alert alert--error" role="alert" tabindex="-1" hidden>
+      <strong>Review the highlighted settings.</strong>
+      <ul></ul>
+    </div>
+
+    <fieldset class="form-section">
+      <legend>Words</legend>
+      <div class="field">
+        <label for="title">Title</label>
+        <input id="title" name="title" type="text" minlength="1" maxlength="120"
+               value="My GPX Adventure" required>
+        <span class="field-error" id="title-error"></span>
+      </div>
+      <div class="field">
+        <label for="subtitle">Subtitle <span>optional</span></label>
+        <input id="subtitle" name="subtitle" type="text" maxlength="200"
+               placeholder="A memorable day outside">
+        <span class="field-error" id="subtitle-error"></span>
+      </div>
+    </fieldset>
+
+    <fieldset class="form-section">
+      <legend>Page</legend>
+      <div class="field-row">
+        <div class="field">
+          <label for="paper-size">Paper size</label>
+          <select id="paper-size" name="paper_size">
+            <option value="A3">A3</option>
+            <option value="A4">A4</option>
+            <option value="A2">A2</option>
+            <option value="LETTER">Letter</option>
+            <option value="custom">Custom size</option>
+          </select>
+        </div>
+        <fieldset class="field">
+          <legend class="field-label">Orientation</legend>
+          <div class="segmented">
+            <label>
+              <input type="radio" name="orientation" value="portrait">
+              <span><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="2" width="10" height="16"></rect></svg>Portrait</span>
+            </label>
+            <label>
+              <input type="radio" name="orientation" value="landscape" checked>
+              <span><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="5" width="16" height="10"></rect></svg>Landscape</span>
+            </label>
+          </div>
+        </fieldset>
+      </div>
+      <div id="custom-paper" class="custom-paper" hidden>
+        <div class="field">
+          <label for="paper-width">Width</label>
+          <input id="paper-width" type="number" min="1" max="1000" step="0.1" value="420">
+        </div>
+        <span aria-hidden="true">×</span>
+        <div class="field">
+          <label for="paper-height">Height</label>
+          <input id="paper-height" type="number" min="1" max="1000" step="0.1" value="297">
+        </div>
+        <div class="field field--unit">
+          <label for="paper-unit">Unit</label>
+          <select id="paper-unit"><option value="mm">mm</option><option value="cm">cm</option><option value="in">in</option></select>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="form-section">
+      <legend>Topographic style</legend>
+      <div id="style-cards" class="style-grid" aria-describedby="style-help"></div>
+      <p id="style-help" class="help-text">Style changes color, linework, and the default map provider.</p>
+    </fieldset>
+
+    <fieldset class="form-section">
+      <legend>Route</legend>
+      <div class="field">
+        <div class="range-heading">
+          <label for="route-width">Route width</label>
+          <output id="route-width-output" for="route-width">3.5 pt</output>
+        </div>
+        <input id="route-width" name="route_width" type="range" min="0.5" max="20" step="0.5" value="3.5">
+      </div>
+      <div class="field">
+        <div class="range-heading">
+          <label for="padding-percent">Map padding</label>
+          <output id="padding-output" for="padding-percent">6%</output>
+        </div>
+        <input id="padding-percent" name="padding_percent" type="range" min="0" max="50" step="0.5" value="6">
+      </div>
+      <div class="field">
+        <label for="route-order">Stage order</label>
+        <select id="route-order" name="route_order">
+          <option value="auto">Connect nearest endpoints automatically</option>
+          <option value="input">Keep uploaded file order</option>
+        </select>
+      </div>
+    </fieldset>
+
+    <fieldset class="form-section">
+      <legend>Output</legend>
+      <div class="segmented segmented--formats">
+        <label><input type="radio" name="output_format" value="pdf" checked><span>PDF</span></label>
+        <label><input type="radio" name="output_format" value="png"><span>PNG</span></label>
+        <label><input type="radio" name="output_format" value="jpeg"><span>JPEG</span></label>
+      </div>
+      <div id="dpi-field" class="field conditional-field" hidden>
+        <label for="dpi">Resolution <span>dpi</span></label>
+        <input id="dpi" name="dpi" type="number" min="72" max="1200" step="1" value="300">
+      </div>
+      <div id="jpeg-quality-field" class="field conditional-field" hidden>
+        <div class="range-heading">
+          <label for="jpeg-quality">JPEG quality</label>
+          <output id="jpeg-quality-output" for="jpeg-quality">92</output>
+        </div>
+        <input id="jpeg-quality" name="jpeg_quality" type="range" min="1" max="100" step="1" value="92">
+      </div>
+    </fieldset>
+
+    <details class="advanced-panel">
+      <summary>
+        <span>Advanced settings</span>
+        <span class="advanced-hint">Map detail &amp; rendering limits</span>
+      </summary>
+      <div class="advanced-content">
+        <div class="field">
+          <label for="provider">Map provider</label>
+          <select id="provider" name="provider">
+            <option value="">Use style default</option>
+          </select>
+          <small id="provider-status" class="help-text">Availability is checked by the server.</small>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="zoom">Map zoom</label>
+            <input id="zoom" name="zoom" type="number" min="0" max="19" value="10">
+          </div>
+          <div class="field">
+            <label for="margin-mm">Margin <span>mm</span></label>
+            <input id="margin-mm" name="margin_mm" type="number" min="1" max="50" step="0.1" value="14.8">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="basemap-width">Basemap width <span>px</span></label>
+            <input id="basemap-width" name="basemap_width" type="number" min="512" max="10000" value="2400">
+          </div>
+          <div class="field">
+            <label for="max-tiles">Maximum tiles</label>
+            <input id="max-tiles" name="max_tiles" type="number" min="1" max="500" value="200">
+          </div>
+        </div>
+        <div class="field">
+          <label for="simplify-points">Line simplification <span>points</span></label>
+          <input id="simplify-points" name="simplify_points" type="number" min="0" max="10" step="0.05" value="0.35">
+          <small class="help-text">Higher values reduce route detail and file complexity.</small>
+        </div>
+      </div>
+    </details>
+
+    <button id="reset-options" class="text-button reset-button" type="button">
+      Reset poster settings
+    </button>
+  </form>
+</section>

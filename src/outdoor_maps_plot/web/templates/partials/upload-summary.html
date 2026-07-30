@@ -1,0 +1,64 @@
+<section class="upload-card card" aria-labelledby="upload-heading">
+  <div class="section-heading">
+    <div class="step-number" aria-hidden="true">1</div>
+    <div>
+      <p class="eyebrow">START WITH THE ROUTE</p>
+      <h2 id="upload-heading">Add your GPX tracks</h2>
+    </div>
+  </div>
+
+  <div class="upload-layout">
+    <div>
+      <label id="drop-zone" class="drop-zone" for="gpx-files" tabindex="0">
+        <input id="gpx-files" name="files" type="file" accept=".gpx,application/gpx+xml"
+               multiple hidden>
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 44V17m0 0L21 28m11-11 11 11"></path>
+          <path d="M16 37v10h32V37"></path>
+        </svg>
+        <span><strong>Drop GPX files here</strong> or browse</span>
+        <small>Up to <span id="max-files-label">15</span> files · 25 MB each</small>
+      </label>
+
+      <div id="file-queue-wrap" class="file-queue-wrap" hidden>
+        <div class="row-heading">
+          <strong>Ready to upload</strong>
+          <button id="clear-files" class="text-button" type="button">Clear all</button>
+        </div>
+        <ul id="file-queue" class="file-list" aria-label="Selected files"></ul>
+        <button id="upload-button" class="button button--primary button--wide" type="button">
+          Read selected tracks
+        </button>
+      </div>
+    </div>
+
+    <div id="upload-summary" class="route-summary" aria-live="polite">
+      <div id="summary-empty" class="summary-empty">
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M12 51 24 13l16 8 12-8v38l-12 8-16-8-12 8V21l12-8"></path>
+          <path d="M24 13v38m16-30v38"></path>
+        </svg>
+        <p>Route details will appear here after upload.</p>
+      </div>
+      <div id="summary-content" hidden>
+        <div class="row-heading">
+          <span class="pill pill--success">Routes ready</span>
+          <button id="delete-upload" class="text-button text-button--danger" type="button">
+            Delete upload
+          </button>
+        </div>
+        <dl class="stats-grid">
+          <div><dt>Routes</dt><dd id="stat-routes">—</dd></div>
+          <div><dt>Distance</dt><dd><span id="stat-distance">—</span> <small>km</small></dd></div>
+          <div><dt>Ascent</dt><dd><span id="stat-ascent">—</span> <small>m</small></dd></div>
+          <div><dt>Points</dt><dd id="stat-points">—</dd></div>
+        </dl>
+        <details class="route-details">
+          <summary>View stages <span id="stage-count"></span></summary>
+          <ol id="route-list" class="route-list"></ol>
+        </details>
+        <p id="expiry-note" class="expiry-note"></p>
+      </div>
+    </div>
+  </div>
+</section>

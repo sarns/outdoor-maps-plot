@@ -3,16 +3,43 @@
 from __future__ import annotations
 
 import math
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+import defusedxml.ElementTree as ET
+from defusedxml.common import DefusedXmlException
+
 Point = tuple[float, float]
 TrackPoint = tuple[float, float, float | None]
+DEFAULT_MAX_POINTS_PER_FILE = 1_000_000
+DEFAULT_MAX_POINTS_TOTAL = 1_000_000
 
 
 class GpxError(ValueError):
     """Raised when GPX input cannot be used."""
+
+
+@dataclass
+class PointBudget:
+    """A shared point allowance for parsing a collection of GPX files."""
+
+    maximum: int = DEFAULT_MAX_POINTS_TOTAL
+    used: int = 0
+
+    def __post_init__(self) -> None:
+        if self.maximum < 1:
+            raise ValueError("maximum point count must be at least one")
+        if not 0 <= self.used <= self.maximum:
+            raise ValueError("used point count must be within the configured maximum")
+
+    @property
+    def remaining(self) -> int:
+        return self.maximum - self.used
+
+    def consume(self, source: Path) -> None:
+        if self.used >= self.maximum:
+            raise GpxError(f"{source.name}: aggregate GPX point limit of {self.maximum:,} exceeded")
+        self.used += 1
 
 
 @dataclass
@@ -53,23 +80,36 @@ def _text(element: ET.Element, name: str) -> str:
     return child.text.strip() if child is not None and child.text else ""
 
 
-def _read_points(container: ET.Element, point_tag: str, path: Path) -> list[TrackPoint]:
+def _read_points(
+    container: ET.Element,
+    point_tag: str,
+    path: Path,
+    *,
+    max_points: int,
+    parsed_points: list[int],
+    point_budget: PointBudget | None,
+) -> list[TrackPoint]:
     points: list[TrackPoint] = []
     for element in container:
         if _local_name(element.tag) != point_tag:
             continue
+        if parsed_points[0] >= max_points:
+            raise GpxError(f"{path.name}: GPX point limit of {max_points:,} exceeded")
+        if point_budget is not None:
+            point_budget.consume(path)
+        parsed_points[0] += 1
         try:
             lat = float(element.attrib["lat"])
             lon = float(element.attrib["lon"])
         except (KeyError, ValueError) as exc:
-            raise GpxError(f"{path}: invalid latitude or longitude") from exc
+            raise GpxError(f"{path.name}: invalid latitude or longitude") from exc
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            raise GpxError(f"{path}: coordinate outside the valid latitude/longitude range")
+            raise GpxError(f"{path.name}: coordinate outside the valid latitude/longitude range")
         elevation_text = _text(element, "ele")
         try:
             elevation = float(elevation_text) if elevation_text else None
         except ValueError as exc:
-            raise GpxError(f"{path}: invalid elevation {elevation_text!r}") from exc
+            raise GpxError(f"{path.name}: invalid elevation") from exc
         points.append((lat, lon, elevation))
     return points
 
@@ -107,30 +147,62 @@ def _build_route(name: str, segments: list[list[TrackPoint]]) -> Route | None:
     return Route(name=name, segments=coordinates, distance_km=distance_km, ascent_m=ascent_m)
 
 
-def parse_gpx(path: Path) -> list[Route]:
-    """Parse GPX tracks and routes without requiring a GPX-specific dependency."""
+def parse_gpx(
+    path: Path,
+    *,
+    max_points: int = DEFAULT_MAX_POINTS_PER_FILE,
+    point_budget: PointBudget | None = None,
+) -> list[Route]:
+    """Safely parse GPX tracks and routes within explicit point limits.
+
+    ``max_points`` is the allowance for this file. Pass the same
+    :class:`PointBudget` to multiple calls to enforce an aggregate upload limit.
+    """
+    if max_points < 1:
+        raise ValueError("max_points must be at least one")
     try:
         root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError) as exc:
-        raise GpxError(f"Could not read {path}: {exc}") from exc
+    except (OSError, ET.ParseError, DefusedXmlException) as exc:
+        raise GpxError(f"Could not parse {path.name} as safe XML") from exc
+    if _local_name(root.tag) != "gpx":
+        raise GpxError(f"{path.name}: root element must be GPX")
 
     routes: list[Route] = []
+    parsed_points = [0]
     for element in root:
         kind = _local_name(element.tag)
         if kind == "trk":
             raw_segments = [
-                _read_points(child, "trkpt", path)
+                _read_points(
+                    child,
+                    "trkpt",
+                    path,
+                    max_points=max_points,
+                    parsed_points=parsed_points,
+                    point_budget=point_budget,
+                )
                 for child in element
                 if _local_name(child.tag) == "trkseg"
             ]
         elif kind == "rte":
-            raw_segments = [_read_points(element, "rtept", path)]
+            raw_segments = [
+                _read_points(
+                    element,
+                    "rtept",
+                    path,
+                    max_points=max_points,
+                    parsed_points=parsed_points,
+                    point_budget=point_budget,
+                )
+            ]
         else:
             continue
         fallback = path.stem if not routes else f"{path.stem} {len(routes) + 1}"
         route = _build_route(_text(element, "name") or fallback, raw_segments)
         if route is not None:
             routes.append(route)
+    if not routes:
+        raise GpxError(f"{path.name}: no usable GPX tracks or routes found")
     return routes
 
 
@@ -168,11 +240,26 @@ def order_routes(routes: list[Route], mode: str) -> list[Route]:
     return ordered
 
 
-def collect_routes(folder: Path, order: str = "auto") -> list[Route]:
+def collect_routes(
+    folder: Path,
+    order: str = "auto",
+    *,
+    max_points_per_file: int = DEFAULT_MAX_POINTS_PER_FILE,
+    max_points_total: int = DEFAULT_MAX_POINTS_TOTAL,
+) -> list[Route]:
     """Read every GPX file below a folder."""
     if not folder.is_dir():
         raise GpxError(f"GPX input folder does not exist: {folder}")
-    routes = [route for path in sorted(folder.rglob("*.gpx")) for route in parse_gpx(path)]
+    budget = PointBudget(max_points_total)
+    routes = [
+        route
+        for path in sorted(folder.rglob("*.gpx"))
+        for route in parse_gpx(
+            path,
+            max_points=max_points_per_file,
+            point_budget=budget,
+        )
+    ]
     if not routes:
         raise GpxError(f"No usable GPX tracks found under {folder}")
     return order_routes(routes, order)

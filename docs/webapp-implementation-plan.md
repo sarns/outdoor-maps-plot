@@ -254,8 +254,7 @@ def render_poster(
     config: PosterConfig,
     progress: ProgressReporter | None = None,
     cancellation: CancellationToken | None = None,
-) -> RenderResult:
-    ...
+) -> RenderResult: ...
 ```
 
 The service owns:

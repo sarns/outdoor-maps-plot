@@ -1,0 +1,33 @@
+services:
+  app:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      OMP_JOB_ROOT: /tmp/poster-jobs
+      OMP_CACHE_ROOT: /var/cache/outdoor-maps-plot
+      TMPDIR: /tmp/poster-jobs
+      OMP_JOB_TTL_SECONDS: "3600"
+      OMP_MAX_FILES: "15"
+      OMP_MAX_FILE_BYTES: "26214400"
+      OMP_MAX_UPLOAD_BYTES: "104857600"
+      OMP_MAX_POINTS: "1000000"
+      OMP_MAX_CONCURRENT_JOBS: "2"
+      OMP_MAX_QUEUED_JOBS: "10"
+      OMP_MAX_TILES: "500"
+      STADIA_MAPS_API_KEY: ${STADIA_MAPS_API_KEY:-}
+      THUNDERFOREST_API_KEY: ${THUNDERFOREST_API_KEY:-}
+    volumes:
+      - poster-cache:/var/cache/outdoor-maps-plot
+    tmpfs:
+      - /tmp/poster-jobs:uid=10001,gid=10001,mode=1770,size=1g
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  poster-cache:

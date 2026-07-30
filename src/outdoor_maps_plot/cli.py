@@ -5,16 +5,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from outdoor_maps_plot import __version__
 from outdoor_maps_plot.gpx import GpxError, collect_routes
+from outdoor_maps_plot.options import PosterConfig
 from outdoor_maps_plot.poster import (
     OUTPUT_FORMATS,
     PAGE_SIZES,
     PosterError,
-    PosterOptions,
-    create_poster,
     resolve_output,
 )
+from outdoor_maps_plot.service import render_poster
 from outdoor_maps_plot.styles import PROVIDERS, STYLES
 
 
@@ -143,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--max-tiles",
-        type=_bounded_int(1, 5000, "tile limit"),
+        type=_bounded_int(1, 500, "tile limit"),
         default=200,
         help="safety limit for map tile downloads",
     )
@@ -194,7 +196,7 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         output, output_format = resolve_output(args.output, args.output_format)
-        options = PosterOptions(
+        config = PosterConfig(
             title=args.title,
             subtitle=args.subtitle,
             paper_size=args.paper_size,
@@ -202,24 +204,25 @@ def main(argv: list[str] | None = None) -> None:
             style_name=args.style,
             provider=args.tile_provider,
             zoom=args.zoom,
-            padding=args.padding / 100,
+            padding_percent=args.padding,
             margin_mm=args.margin_mm,
             basemap_width=args.basemap_width,
             max_tiles=args.max_tiles,
             simplify_points=args.simplify,
             route_width=args.route_width,
+            route_order=args.route_order,
+            output_format=output_format,
             dpi=args.dpi,
             jpeg_quality=args.jpeg_quality,
         )
         routes = collect_routes(args.folder.resolve(), args.route_order)
-        create_poster(
+        render_poster(
             routes,
             output.resolve(),
-            output_format,
             args.cache.resolve(),
-            options,
+            config,
         )
-    except (GpxError, PosterError) as exc:
+    except (GpxError, PosterError, ValidationError) as exc:
         parser.error(str(exc))
     print(f"Created {output.resolve()}")
 

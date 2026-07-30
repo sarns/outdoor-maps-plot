@@ -1,0 +1,17 @@
+<section id="job-progress" class="job-progress" aria-labelledby="progress-label" hidden>
+  <div class="progress-heading">
+    <div>
+      <strong id="progress-label">Preparing poster</strong>
+      <span id="progress-message">Waiting for a render worker…</span>
+    </div>
+    <span id="progress-percent">0%</span>
+  </div>
+  <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+       aria-valuenow="0" aria-labelledby="progress-label">
+    <span id="progress-bar"></span>
+  </div>
+  <div id="progress-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <button id="cancel-job" class="text-button text-button--danger" type="button">
+    Cancel render
+  </button>
+</section>

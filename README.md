@@ -1,10 +1,34 @@
 # outdoor-maps-plot
 
-Create print-ready topographic posters from a folder of GPX tracks. The poster
-contains a real tiled basemap, an emphasized route, stage distance/ascent
-statistics, endpoints, coordinates, and provider attribution.
+Create print-ready topographic posters from GPX tracks through a browser or the
+command line. Posters contain a real tiled basemap, an emphasized route, stage
+distance/ascent statistics, endpoints, coordinates, and provider attribution.
 
-## Requirements
+## Web application
+
+Docker is the simplest way to run the browser interface; it does not require
+Python or `uv` on the host:
+
+```shell
+docker compose up --build
+```
+
+Open <http://localhost:8000>, upload up to 15 GPX files, configure the poster,
+generate a preview, and download PDF, PNG, or JPEG output. Uploaded files and
+generated artifacts expire automatically. Map tiles are retained in the
+`poster-cache` Docker volume.
+
+The service binds to localhost by default. Configure authentication and a TLS
+reverse proxy before deliberately exposing it to a network.
+
+For local web development:
+
+```shell
+uv sync
+uv run outdoor-maps-web
+```
+
+## CLI requirements
 
 - [uv](https://docs.astral.sh/uv/)
 - Internet access for the first map render
@@ -21,7 +45,7 @@ uv --version
 The project pins its complete environment in `uv.lock`; no manual virtual
 environment or `pip install` step is needed.
 
-## Quick start
+## CLI quick start
 
 Put GPX files in `data/` (they are ignored by Git), then run:
 
@@ -95,7 +119,3 @@ uv run ruff format --check .
 uv run ruff check .
 uv run pytest
 ```
-
-The compatibility script can still be invoked as
-`uv run python create_a3_poster.py`, but the installed
-`outdoor-maps-plot` command is preferred.
