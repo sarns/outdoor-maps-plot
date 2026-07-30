@@ -1,0 +1,18 @@
+# Local route data and generated artifacts
+*.gpx
+output/
+.cache/
+
+# Local environments and secrets
+.venv/
+.uv-tool/
+.env
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
