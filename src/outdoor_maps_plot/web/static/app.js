@@ -175,6 +175,7 @@
 
   function applyDefaults(defaults) {
     if (!defaults) return;
+    byId("use-style-route-color").checked = !defaults.route_color;
     Object.entries(defaults).forEach(([name, value]) => {
       const inputs = form.elements.namedItem(name);
       if (!inputs) return;
@@ -418,6 +419,7 @@
       max_tiles: Number(data.get("max_tiles")),
       simplify_points: Number(data.get("simplify_points")),
       route_width: Number(data.get("route_width")),
+      route_color: byId("use-style-route-color").checked ? null : byId("route-color").value,
       route_order: data.get("route_order") || "auto",
       output_format: data.get("output_format") || "pdf",
       dpi: Number(data.get("dpi")),
@@ -482,6 +484,14 @@
 
   function syncControls() {
     const config = collectConfig();
+    const useStyleRouteColor = byId("use-style-route-color").checked;
+    const routeColor = byId("route-color");
+    routeColor.disabled = useStyleRouteColor;
+    if (useStyleRouteColor) {
+      const selectedStyle = configStyles(state.apiConfig)
+        .find((style) => style.id === config.style_name);
+      routeColor.value = selectedStyle?.route || "#E4431B";
+    }
     const custom = byId("paper-size").value === "custom";
     byId("custom-paper").hidden = !custom;
     const raster = config.output_format !== "pdf";

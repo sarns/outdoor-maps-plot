@@ -72,6 +72,7 @@ def test_every_poster_config_field_is_represented() -> None:
         "max_tiles",
         "simplify_points",
         "route_width",
+        "route_color",
         "route_order",
         "output_format",
         "dpi",

@@ -21,3 +21,10 @@ def test_poster_config_rejects_unknown_fields_and_provider_zoom() -> None:
         PosterConfig(unexpected=True)
     with pytest.raises(ValidationError, match="OpenTopoMap supports zoom"):
         PosterConfig(provider="opentopo", zoom=18)
+
+
+def test_route_color_override_is_normalized_and_validated() -> None:
+    assert PosterConfig(style_name="cool-minimal").effective_route_color == "#153F63"
+    assert PosterConfig(route_color="#2b6cb0").effective_route_color == "#2B6CB0"
+    with pytest.raises(ValidationError, match="six-digit hexadecimal"):
+        PosterConfig(route_color="blue")

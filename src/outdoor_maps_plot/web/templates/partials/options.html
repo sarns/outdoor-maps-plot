@@ -89,6 +89,16 @@
         <input id="route-width" name="route_width" type="range" min="0.5" max="20" step="0.5" value="3.5">
       </div>
       <div class="field">
+        <label for="route-color">Track color</label>
+        <div class="color-control">
+          <input id="route-color" name="route_color" type="color" value="#e4431b" disabled>
+          <label class="check-label" for="use-style-route-color">
+            <input id="use-style-route-color" type="checkbox" checked>
+            Use selected style color
+          </label>
+        </div>
+      </div>
+      <div class="field">
         <div class="range-heading">
           <label for="padding-percent">Map padding</label>
           <output id="padding-output" for="padding-percent">6%</output>

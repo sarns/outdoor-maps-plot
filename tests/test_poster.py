@@ -72,6 +72,14 @@ def test_offline_poster_render(
         )
 
     monkeypatch.setattr(poster, "make_basemap", fake_basemap)
+    requested_colors: list[str] = []
+    original_hex_color = poster.HexColor
+
+    def recording_hex_color(value: str):
+        requested_colors.append(value)
+        return original_hex_color(value)
+
+    monkeypatch.setattr(poster, "HexColor", recording_hex_color)
     output = tmp_path / f"poster{suffix}"
 
     create_poster(
@@ -79,7 +87,13 @@ def test_offline_poster_render(
         output,
         output_format,
         tmp_path / "cache",
-        PosterOptions(paper_size="A5", dpi=72, basemap_width=512),
+        PosterOptions(
+            paper_size="A5",
+            dpi=72,
+            basemap_width=512,
+            route_color="#2B6CB0",
+        ),
     )
 
     assert output.read_bytes().startswith(signature)
+    assert "#2B6CB0" in requested_colors

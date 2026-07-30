@@ -265,6 +265,7 @@ def test_preview_enforces_server_owned_output_limits(
                 "dpi": 900,
                 "basemap_width": 9000,
                 "max_tiles": 500,
+                "route_color": "#2b6cb0",
             },
         },
     )
@@ -275,6 +276,7 @@ def test_preview_enforces_server_owned_output_limits(
     assert effective.dpi == 96
     assert effective.basemap_width == 1200
     assert effective.max_tiles == 100
+    assert effective.route_color == "#2B6CB0"
 
 
 def test_render_errors_are_safe(client: TestClient, settings: WebSettings) -> None:

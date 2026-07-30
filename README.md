@@ -79,6 +79,7 @@ a north-to-south itinerary using their nearest endpoints. Use
 --zoom 10                   Tile zoom level
 --padding 6                 Route bounds padding in percent
 --route-width 3.5           Route line width in points at A3
+--route-color "#2B6CB0"     Override the track color with #RRGGBB
 --tile-provider esri        Override the style's map provider
 ```
 

@@ -19,6 +19,7 @@ CUSTOM_PAPER_PATTERN = re.compile(
     r"(?P<unit>MM|CM|IN)",
     re.IGNORECASE,
 )
+HEX_COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}")
 
 
 def _ui(
@@ -190,6 +191,15 @@ class PosterConfig(BaseModel):
             unit="points",
         ),
     )
+    route_color: str | None = Field(
+        default=None,
+        description="Optional route color override as a six-digit hexadecimal color.",
+        json_schema_extra=_ui(
+            "Track color",
+            "route",
+            "Override the track color supplied by the selected topographic style.",
+        ),
+    )
     route_order: RouteOrder = Field(
         default="auto",
         description="Automatic endpoint ordering or input order.",
@@ -263,6 +273,15 @@ class PosterConfig(BaseModel):
             raise ValueError(f"unknown tile provider: {value}")
         return value
 
+    @field_validator("route_color")
+    @classmethod
+    def validate_route_color(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not HEX_COLOR_PATTERN.fullmatch(value):
+            raise ValueError("use a six-digit hexadecimal color such as #E4431B")
+        return value.upper()
+
     @model_validator(mode="after")
     def validate_provider_zoom(self) -> PosterConfig:
         provider = self.provider or STYLES[self.style_name].provider
@@ -273,3 +292,7 @@ class PosterConfig(BaseModel):
     @property
     def effective_provider(self) -> str:
         return self.provider or STYLES[self.style_name].provider
+
+    @property
+    def effective_route_color(self) -> str:
+        return self.route_color or STYLES[self.style_name].route

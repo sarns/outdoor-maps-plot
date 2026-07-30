@@ -65,6 +65,7 @@ class PosterOptions:
     max_tiles: int = 200
     simplify_points: float = 0.35
     route_width: float = 3.5
+    route_color: str | None = None
     dpi: int = 300
     jpeg_quality: int = 92
 
@@ -83,6 +84,7 @@ class PosterOptions:
             max_tiles=self.max_tiles,
             simplify_points=self.simplify_points,
             route_width=self.route_width,
+            route_color=self.route_color,
             output_format="jpeg" if output_format == "jpg" else output_format,
             dpi=self.dpi,
             jpeg_quality=self.jpeg_quality,
@@ -459,6 +461,7 @@ def _render_pdf(
     if not routes:
         raise PosterError("At least one usable route is required")
     style: Style = STYLES[config.style_name]
+    route_color = config.effective_route_color
     provider = config.effective_provider
     page_w, page_h = oriented_page_size(config.paper_size, config.orientation)
     reference_w, reference_h = oriented_page_size("A3", config.orientation)
@@ -533,7 +536,7 @@ def _render_pdf(
         config.simplify_points * scale,
         cancellation_check,
     )
-    canvas.setStrokeColor(HexColor(style.route))
+    canvas.setStrokeColor(HexColor(route_color))
     canvas.setLineWidth(config.route_width * scale)
     _draw_route_paths(
         canvas,
@@ -549,7 +552,7 @@ def _render_pdf(
             x, y = project(point)
             canvas.setFillColor(HexColor(style.halo))
             canvas.circle(x, y, 4.2 * scale, fill=1, stroke=0)
-            canvas.setFillColor(HexColor(style.route))
+            canvas.setFillColor(HexColor(route_color))
             canvas.circle(x, y, 2.35 * scale, fill=1, stroke=0)
     canvas.restoreState()
 
