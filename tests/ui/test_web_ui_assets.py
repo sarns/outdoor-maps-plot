@@ -53,6 +53,7 @@ def test_index_has_unique_ids_and_programmatic_labels() -> None:
 
     assert len(inspector.ids) == len(set(inspector.ids))
     assert set(inspector.labels) <= set(inspector.controls)
+    assert "/static/theme.js" in inspector.scripts
     assert "/static/app.js" in inspector.scripts
     assert "/static/app.css" in inspector.stylesheets
 
@@ -98,3 +99,16 @@ def test_ui_has_no_runtime_cdn_and_supports_documented_workflow() -> None:
     assert "maxFiles = Math.min" in javascript
     assert 'createRender("preview")' in javascript
     assert 'createRender("final")' in javascript
+
+
+def test_ui_supports_persistent_light_and_dark_themes() -> None:
+    html = render_index()
+    stylesheet = (STATIC / "app.css").read_text(encoding="utf-8")
+    theme_javascript = (STATIC / "theme.js").read_text(encoding="utf-8")
+
+    assert 'id="theme-toggle"' in html
+    assert 'content="light dark"' in html
+    assert ':root[data-theme="dark"]' in stylesheet
+    assert "prefers-color-scheme: dark" in theme_javascript
+    assert "window.localStorage" in theme_javascript
+    assert 'root.dataset.theme === "dark" ? "light" : "dark"' in theme_javascript
