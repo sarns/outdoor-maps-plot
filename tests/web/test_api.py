@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from outdoor_maps_plot.poster import PosterError
 from outdoor_maps_plot.service import RenderCancelled, RenderResult
 from outdoor_maps_plot.web.app import create_app
 from outdoor_maps_plot.web.config import WebSettings
@@ -277,6 +278,46 @@ def test_preview_enforces_server_owned_output_limits(
     assert effective.basemap_width == 1200
     assert effective.max_tiles == 100
     assert effective.route_color == "#2B6CB0"
+
+
+def test_custom_paper_size_reaches_renderer(client: TestClient, renderer: FakeRenderer) -> None:
+    uploaded = upload(client)
+    accepted = client.post(
+        "/api/renders",
+        json={
+            "upload_id": uploaded["upload_id"],
+            "mode": "final",
+            "config": {"paper_size": "300x400mm"},
+        },
+    )
+
+    result = wait_for_terminal(client, accepted.json()["job_id"])
+
+    assert result["status"] == "succeeded"
+    assert renderer.calls[-1]["config"].paper_size == "300X400MM"
+
+
+def test_expected_poster_errors_are_actionable(
+    settings: WebSettings, renderer: FakeRenderer
+) -> None:
+    def failing_renderer(*args, **kwargs):
+        raise PosterError("The selected extent requires too many map tiles; lower the zoom.")
+
+    app = create_app(settings, failing_renderer)
+    with TestClient(app, raise_server_exceptions=False) as local:
+        uploaded = upload(local)
+        accepted = local.post(
+            "/api/renders",
+            json={"upload_id": uploaded["upload_id"], "config": {"paper_size": "300x400mm"}},
+        )
+        result = wait_for_terminal(local, accepted.json()["job_id"])
+
+    assert result["status"] == "failed"
+    assert result["error"] == {
+        "code": "poster_error",
+        "message": "The selected extent requires too many map tiles; lower the zoom.",
+        "details": [],
+    }
 
 
 def test_render_errors_are_safe(client: TestClient, settings: WebSettings) -> None:

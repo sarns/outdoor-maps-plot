@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from outdoor_maps_plot.options import PosterConfig
+from outdoor_maps_plot.poster import PosterError
 from outdoor_maps_plot.service import (
     CancellationToken,
     ProgressEvent,
@@ -24,6 +26,7 @@ from outdoor_maps_plot.web.storage import UploadRecord, WorkspaceStore, _identif
 
 RenderCallable = Callable[..., RenderResult]
 TERMINAL_STATES = {"succeeded", "failed", "cancelled", "expired"}
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -153,7 +156,21 @@ class JobManager:
             with self._lock:
                 job.status = "cancelled"
                 job.progress = ProgressEvent("finalizing", 100, "Render cancelled", utc_now())
-        except Exception:
+        except PosterError as exc:
+            LOGGER.warning(
+                "Poster render rejected for job %s: %s",
+                job.job_id,
+                exc,
+            )
+            with self._lock:
+                job.status = "failed"
+                job.error = ErrorBody(
+                    code="poster_error",
+                    message=str(exc),
+                )
+                job.progress = ProgressEvent("finalizing", 100, "Render failed", utc_now())
+        except Exception as exc:
+            LOGGER.exception("Poster render failed for job %s", job.job_id, exc_info=exc)
             with self._lock:
                 job.status = "failed"
                 job.error = ErrorBody(

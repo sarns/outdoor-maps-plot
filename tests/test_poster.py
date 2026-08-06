@@ -97,3 +97,36 @@ def test_offline_poster_render(
 
     assert output.read_bytes().startswith(signature)
     assert "#2B6CB0" in requested_colors
+
+
+def test_offline_custom_size_poster_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    route = Route(
+        name="Custom poster stage",
+        segments=[[(47.0, 10.0), (47.1, 10.1), (47.2, 10.0)]],
+        distance_km=25.0,
+        ascent_m=750.0,
+    )
+
+    def fake_basemap(*args: object, **kwargs: object):
+        image_path = tmp_path / "custom-basemap.png"
+        Image.new("RGB", (800, 600), "#d9dfd5").save(image_path)
+        pixels = [world_pixel(point, 10) for point in route.points]
+        return image_path, (
+            min(point[0] for point in pixels) - 10,
+            min(point[1] for point in pixels) - 10,
+            max(point[0] for point in pixels) + 10,
+            max(point[1] for point in pixels) + 10,
+        )
+
+    monkeypatch.setattr(poster, "make_basemap", fake_basemap)
+    output = tmp_path / "custom-poster.pdf"
+
+    create_poster(
+        [route],
+        output,
+        "pdf",
+        tmp_path / "cache",
+        PosterOptions(paper_size="300x400mm", basemap_width=512),
+    )
+
+    assert output.read_bytes().startswith(b"%PDF")
