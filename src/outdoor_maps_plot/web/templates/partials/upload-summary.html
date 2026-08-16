@@ -3,20 +3,21 @@
     <div class="step-number" aria-hidden="true">1</div>
     <div>
       <p class="eyebrow">START WITH THE ROUTE</p>
-      <h2 id="upload-heading">Add your GPX tracks</h2>
+      <h2 id="upload-heading">Add your GPX or FIT tracks</h2>
     </div>
   </div>
 
   <div class="upload-layout">
     <div>
       <label id="drop-zone" class="drop-zone" for="gpx-files" tabindex="0">
-        <input id="gpx-files" name="files" type="file" accept=".gpx,application/gpx+xml"
+        <input id="gpx-files" name="files" type="file"
+               accept=".gpx,.fit,application/gpx+xml,application/vnd.ant.fit"
                multiple hidden>
         <svg viewBox="0 0 64 64" aria-hidden="true">
           <path d="M32 44V17m0 0L21 28m11-11 11 11"></path>
           <path d="M16 37v10h32V37"></path>
         </svg>
-        <span><strong>Drop GPX files here</strong> or browse</span>
+        <span><strong>Drop GPX or FIT files here</strong> or browse</span>
         <small>Up to <span id="max-files-label">15</span> files · 25 MB each</small>
       </label>
 

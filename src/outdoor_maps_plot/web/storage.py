@@ -11,7 +11,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePath
 from typing import BinaryIO
 
-from outdoor_maps_plot.gpx import GpxError, PointBudget, Route, parse_gpx
+from outdoor_maps_plot.gpx import (
+    SUPPORTED_ROUTE_EXTENSIONS,
+    GpxError,
+    PointBudget,
+    Route,
+    parse_route_file,
+)
 from outdoor_maps_plot.web.config import WebSettings
 from outdoor_maps_plot.web.errors import ApiError
 
@@ -100,14 +106,16 @@ class WorkspaceStore:
         point_budget: PointBudget,
     ) -> tuple[StoredFile, list[Route], int]:
         display_name = _display_name(filename, index)
-        if PurePath(display_name).suffix.lower() != ".gpx":
+        suffix = PurePath(display_name).suffix.lower()
+        if suffix not in SUPPORTED_ROUTE_EXTENSIONS:
             raise ApiError(
                 422,
                 "invalid_file_type",
-                "Only files with a .gpx extension are accepted.",
+                "Only files with a .gpx or .fit extension are accepted.",
                 [{"file": display_name}],
             )
-        destination = contained_path(self.root, workspace / "input" / f"{index:03d}.gpx")
+        format_name = suffix[1:].upper()
+        destination = contained_path(self.root, workspace / "input" / f"{index:03d}{suffix}")
         size = 0
         try:
             with destination.open("xb") as target:
@@ -118,7 +126,7 @@ class WorkspaceStore:
                         raise ApiError(
                             413,
                             "file_too_large",
-                            "One GPX file exceeds the allowed size.",
+                            f"One {format_name} file exceeds the allowed size.",
                             [{"file": display_name, "limit_bytes": self.settings.max_file_bytes}],
                         )
                     if aggregate_bytes > self.settings.max_upload_bytes:
@@ -130,30 +138,31 @@ class WorkspaceStore:
                         )
                     target.write(chunk)
             try:
-                routes = parse_gpx(
+                routes = parse_route_file(
                     destination,
                     max_points=self.settings.max_points_total,
                     point_budget=point_budget,
+                    default_name=PurePath(display_name).stem,
                 )
             except GpxError as exc:
                 if point_budget.remaining == 0:
                     raise ApiError(
                         413,
                         "too_many_points",
-                        "The uploaded GPX data contains too many points.",
+                        f"The uploaded {format_name} data contains too many points.",
                         [{"limit": self.settings.max_points_total}],
                     ) from exc
                 raise ApiError(
                     422,
-                    "invalid_gpx",
-                    "One GPX file could not be parsed.",
+                    f"invalid_{format_name.lower()}",
+                    f"One {format_name} file could not be parsed.",
                     [{"file": display_name}],
                 ) from exc
             if not routes:
                 raise ApiError(
                     422,
-                    "invalid_gpx",
-                    "One GPX file contains no usable tracks or routes.",
+                    f"invalid_{format_name.lower()}",
+                    f"One {format_name} file contains no usable positioned tracks or routes.",
                     [{"file": display_name}],
                 )
             return StoredFile(display_name, destination, size, len(routes)), routes, aggregate_bytes
@@ -173,7 +182,7 @@ class WorkspaceStore:
             raise ApiError(
                 413,
                 "too_many_points",
-                "The uploaded GPX data contains too many points.",
+                "The uploaded route data contains too many points.",
                 [{"limit": self.settings.max_points_total}],
             )
         now = utc_now()

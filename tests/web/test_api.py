@@ -94,6 +94,17 @@ def upload(client: TestClient, name: str = "route.gpx") -> dict[str, object]:
     return response.json()
 
 
+def upload_fit(
+    client: TestClient, fit_bytes: bytes, name: str = "activity.fit"
+) -> dict[str, object]:
+    response = client.post(
+        "/api/uploads",
+        files={"files": (name, fit_bytes, "application/vnd.ant.fit")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def wait_for_terminal(client: TestClient, job_id: str) -> dict[str, object]:
     for _ in range(100):
         response = client.get(f"/api/renders/{job_id}")
@@ -156,8 +167,22 @@ def test_upload_returns_summary_and_uses_generated_paths(
     assert fetched.json()["summary"] == body["summary"]
 
 
+def test_upload_accepts_fit_and_returns_route_summary(
+    client: TestClient, settings: WebSettings, fit_bytes: bytes
+) -> None:
+    body = upload_fit(client, fit_bytes, r"C:\private\morning-ride.FIT")
+
+    assert body["files"][0]["display_name"] == "morning-ride.FIT"
+    assert body["summary"]["route_count"] == 1
+    assert body["summary"]["point_count"] == 3
+    assert body["summary"]["ascent_m"] == 50.0
+    assert body["routes"][0]["name"] == "morning-ride"
+    stored = list((settings.job_root / body["upload_id"] / "input").iterdir())
+    assert [path.name for path in stored] == ["001.fit"]
+
+
 def test_upload_limits_and_safe_validation_errors(
-    settings: WebSettings, renderer: FakeRenderer
+    settings: WebSettings, renderer: FakeRenderer, fit_bytes: bytes
 ) -> None:
     app = create_app(settings.model_copy(update={"max_files": 2}), renderer)
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -180,6 +205,13 @@ def test_upload_limits_and_safe_validation_errors(
         payload = malformed.json()
         assert payload["error"]["code"] == "invalid_gpx"
         assert str(settings.job_root) not in malformed.text
+
+        invalid_fit = client.post(
+            "/api/uploads",
+            files={"files": ("broken.fit", fit_bytes[:-1])},
+        )
+        assert invalid_fit.status_code == 422
+        assert invalid_fit.json()["error"]["code"] == "invalid_fit"
 
     small = settings.model_copy(update={"max_file_bytes": 128, "max_upload_bytes": 256})
     with TestClient(create_app(small, renderer), raise_server_exceptions=False) as client:

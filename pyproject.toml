@@ -1,13 +1,14 @@
 [project]
 name = "outdoor-maps-plot"
 version = "0.2.0"
-description = "Create print-ready topographic posters from GPX tracks."
+description = "Create print-ready topographic posters from GPX and FIT tracks."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "defusedxml>=0.7,<1",
     "fastapi>=0.116,<1",
+    "fitdecode>=0.11,<1",
     "jinja2>=3.1,<4",
     "pillow>=11.0,<13",
     "pydantic>=2.11,<3",

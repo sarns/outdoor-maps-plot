@@ -247,9 +247,9 @@
     const maxBytes = Number(limits.max_file_bytes || 25 * 1024 ** 2);
     const totalMax = Number(limits.max_upload_bytes || 100 * 1024 ** 2);
     const incoming = [...fileList];
-    const invalid = incoming.find((file) => !file.name.toLowerCase().endsWith(".gpx"));
+    const invalid = incoming.find((file) => !/\.(gpx|fit)$/i.test(file.name));
     if (invalid) {
-      showError(new Error(`${invalid.name} is not a GPX file.`), "Choose GPX tracks");
+      showError(new Error(`${invalid.name} is not a GPX or FIT file.`), "Choose route tracks");
       return;
     }
     const oversized = incoming.find((file) => file.size > maxBytes);
@@ -268,7 +268,7 @@
       if (!duplicate) unique.push(file);
     }
     if (unique.length > maxFiles) {
-      showError(new Error(`Select no more than ${maxFiles} GPX files at once.`), "Too many files");
+      showError(new Error(`Select no more than ${maxFiles} GPX or FIT files at once.`), "Too many files");
       return;
     }
     const total = unique.reduce((sum, file) => sum + file.size, 0);

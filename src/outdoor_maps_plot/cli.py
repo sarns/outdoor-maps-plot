@@ -50,7 +50,9 @@ def _positive_float(label: str, *, allow_zero: bool = False):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Create a print-ready topographic poster from every GPX track in a folder.",
+        description=(
+            "Create a print-ready topographic poster from every GPX or FIT track in a folder."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -58,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         type=Path,
         default=Path("data"),
-        help="folder searched recursively for GPX files",
+        help="folder searched recursively for GPX and FIT files",
     )
     parser.add_argument(
         "-o",
@@ -133,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_float("simplification tolerance", allow_zero=True),
         default=0.35,
         metavar="POINTS",
-        help="visual line simplification tolerance; zero preserves every GPX point",
+        help="visual line simplification tolerance; zero preserves every route point",
     )
     parser.add_argument(
         "--route-order",

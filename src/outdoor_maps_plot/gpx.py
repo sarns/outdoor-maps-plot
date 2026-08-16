@@ -1,4 +1,4 @@
-"""GPX parsing and route ordering."""
+"""GPX/FIT parsing and route ordering."""
 
 from __future__ import annotations
 
@@ -7,21 +7,28 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
+import fitdecode
 from defusedxml.common import DefusedXmlException
 
 Point = tuple[float, float]
 TrackPoint = tuple[float, float, float | None]
 DEFAULT_MAX_POINTS_PER_FILE = 1_000_000
 DEFAULT_MAX_POINTS_TOTAL = 1_000_000
+SUPPORTED_ROUTE_EXTENSIONS = frozenset({".fit", ".gpx"})
+SEMICIRCLES_PER_DEGREE = 2**31 / 180
 
 
 class GpxError(ValueError):
-    """Raised when GPX input cannot be used."""
+    """Raised when a GPX or FIT input file cannot be used.
+
+    The established name is retained for compatibility with callers that
+    already catch parsing and collection errors from this module.
+    """
 
 
 @dataclass
 class PointBudget:
-    """A shared point allowance for parsing a collection of GPX files."""
+    """A shared point allowance for parsing a collection of route files."""
 
     maximum: int = DEFAULT_MAX_POINTS_TOTAL
     used: int = 0
@@ -36,15 +43,17 @@ class PointBudget:
     def remaining(self) -> int:
         return self.maximum - self.used
 
-    def consume(self, source: Path) -> None:
+    def consume(self, source: Path, format_name: str = "GPX") -> None:
         if self.used >= self.maximum:
-            raise GpxError(f"{source.name}: aggregate GPX point limit of {self.maximum:,} exceeded")
+            raise GpxError(
+                f"{source.name}: aggregate {format_name} point limit of {self.maximum:,} exceeded"
+            )
         self.used += 1
 
 
 @dataclass
 class Route:
-    """One GPX track or route and its calculated statistics."""
+    """One activity track or route and its calculated statistics."""
 
     name: str
     segments: list[list[Point]]
@@ -152,6 +161,7 @@ def parse_gpx(
     *,
     max_points: int = DEFAULT_MAX_POINTS_PER_FILE,
     point_budget: PointBudget | None = None,
+    default_name: str | None = None,
 ) -> list[Route]:
     """Safely parse GPX tracks and routes within explicit point limits.
 
@@ -197,13 +207,112 @@ def parse_gpx(
             ]
         else:
             continue
-        fallback = path.stem if not routes else f"{path.stem} {len(routes) + 1}"
+        base_name = default_name or path.stem
+        fallback = base_name if not routes else f"{base_name} {len(routes) + 1}"
         route = _build_route(_text(element, "name") or fallback, raw_segments)
         if route is not None:
             routes.append(route)
     if not routes:
         raise GpxError(f"{path.name}: no usable GPX tracks or routes found")
     return routes
+
+
+def _fit_value(message: fitdecode.FitDataMessage, field_name: str) -> object | None:
+    return message.get_value(field_name, fallback=None)
+
+
+def parse_fit(
+    path: Path,
+    *,
+    max_points: int = DEFAULT_MAX_POINTS_PER_FILE,
+    point_budget: PointBudget | None = None,
+    default_name: str | None = None,
+) -> list[Route]:
+    """Parse the positioned records in a FIT activity or course file."""
+    if max_points < 1:
+        raise ValueError("max_points must be at least one")
+
+    points: list[TrackPoint] = []
+    route_name = default_name or path.stem
+    try:
+        with fitdecode.FitReader(
+            path,
+            check_crc=fitdecode.CrcCheck.RAISE,
+            error_handling=fitdecode.ErrorHandling.RAISE,
+        ) as reader:
+            for frame in reader:
+                if frame.frame_type != fitdecode.FIT_FRAME_DATA:
+                    continue
+                if frame.name == "course":
+                    name = _fit_value(frame, "name")
+                    if isinstance(name, str) and name.strip():
+                        route_name = name.strip()
+                    continue
+                if frame.name != "record":
+                    continue
+
+                raw_latitude = _fit_value(frame, "position_lat")
+                raw_longitude = _fit_value(frame, "position_long")
+                if raw_latitude is None or raw_longitude is None:
+                    continue
+                try:
+                    latitude = float(raw_latitude) / SEMICIRCLES_PER_DEGREE
+                    longitude = float(raw_longitude) / SEMICIRCLES_PER_DEGREE
+                except (TypeError, ValueError) as exc:
+                    raise GpxError(f"{path.name}: invalid FIT latitude or longitude") from exc
+                if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                    raise GpxError(
+                        f"{path.name}: FIT coordinate outside the valid latitude/longitude range"
+                    )
+
+                raw_elevation = _fit_value(frame, "enhanced_altitude")
+                if raw_elevation is None:
+                    raw_elevation = _fit_value(frame, "altitude")
+                try:
+                    elevation = float(raw_elevation) if raw_elevation is not None else None
+                except (TypeError, ValueError) as exc:
+                    raise GpxError(f"{path.name}: invalid FIT elevation") from exc
+
+                if len(points) >= max_points:
+                    raise GpxError(f"{path.name}: FIT point limit of {max_points:,} exceeded")
+                if point_budget is not None:
+                    point_budget.consume(path, "FIT")
+                points.append((latitude, longitude, elevation))
+    except GpxError:
+        raise
+    except (OSError, fitdecode.FitError) as exc:
+        raise GpxError(f"Could not parse {path.name} as a valid FIT file") from exc
+
+    route = _build_route(route_name, [points])
+    if route is None:
+        raise GpxError(f"{path.name}: no usable positioned FIT records found")
+    return [route]
+
+
+def parse_route_file(
+    path: Path,
+    *,
+    max_points: int = DEFAULT_MAX_POINTS_PER_FILE,
+    point_budget: PointBudget | None = None,
+    default_name: str | None = None,
+) -> list[Route]:
+    """Parse one supported route file based on its extension."""
+    suffix = path.suffix.lower()
+    if suffix == ".gpx":
+        return parse_gpx(
+            path,
+            max_points=max_points,
+            point_budget=point_budget,
+            default_name=default_name,
+        )
+    if suffix == ".fit":
+        return parse_fit(
+            path,
+            max_points=max_points,
+            point_budget=point_budget,
+            default_name=default_name,
+        )
+    raise GpxError(f"{path.name}: only GPX and FIT route files are supported")
 
 
 def _endpoint_distance(first: Point, second: Point) -> float:
@@ -247,19 +356,22 @@ def collect_routes(
     max_points_per_file: int = DEFAULT_MAX_POINTS_PER_FILE,
     max_points_total: int = DEFAULT_MAX_POINTS_TOTAL,
 ) -> list[Route]:
-    """Read every GPX file below a folder."""
+    """Read every GPX and FIT file below a folder."""
     if not folder.is_dir():
-        raise GpxError(f"GPX input folder does not exist: {folder}")
+        raise GpxError(f"Route input folder does not exist: {folder}")
     budget = PointBudget(max_points_total)
+    paths = sorted(
+        path for path in folder.rglob("*") if path.suffix.lower() in SUPPORTED_ROUTE_EXTENSIONS
+    )
     routes = [
         route
-        for path in sorted(folder.rglob("*.gpx"))
-        for route in parse_gpx(
+        for path in paths
+        for route in parse_route_file(
             path,
             max_points=max_points_per_file,
             point_budget=budget,
         )
     ]
     if not routes:
-        raise GpxError(f"No usable GPX tracks found under {folder}")
+        raise GpxError(f"No usable GPX or FIT tracks found under {folder}")
     return order_routes(routes, order)

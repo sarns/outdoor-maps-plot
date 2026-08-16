@@ -16,6 +16,13 @@ and license notices for PDFium's bundled dependencies.
 Binary redistributions must retain the license material shipped in the
 `pypdfium2` wheel.
 
+## fitdecode
+
+`fitdecode` is used to decode user-provided FIT activity and course files. It
+is distributed under the MIT License.
+
+- <https://github.com/polyvertex/fitdecode>
+
 ## Map data and rendered tiles
 
 Generated posters include attribution for the selected provider and its data

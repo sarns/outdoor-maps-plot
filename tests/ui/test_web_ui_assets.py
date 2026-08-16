@@ -99,6 +99,8 @@ def test_ui_has_no_runtime_cdn_and_supports_documented_workflow() -> None:
     assert "maxFiles = Math.min" in javascript
     assert 'createRender("preview")' in javascript
     assert 'createRender("final")' in javascript
+    assert 'accept=".gpx,.fit,application/gpx+xml,application/vnd.ant.fit"' in html
+    assert "/\\.(gpx|fit)$/i" in javascript
 
 
 def test_ui_supports_persistent_light_and_dark_themes() -> None:

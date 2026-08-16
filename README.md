@@ -1,8 +1,9 @@
 # outdoor-maps-plot
 
-Create print-ready topographic posters from GPX tracks through a browser or the
-command line. Posters contain a real tiled basemap, an emphasized route, stage
-distance/ascent statistics, endpoints, coordinates, and provider attribution.
+Create print-ready topographic posters from GPX and FIT tracks through a browser
+or the command line. Posters contain a real tiled basemap, an emphasized route,
+stage distance/ascent statistics, endpoints, coordinates, and provider
+attribution.
 
 ## Sample posters
 
@@ -25,9 +26,9 @@ Python or `uv` on the host:
 docker compose up --build
 ```
 
-Open <http://localhost:8000>, upload up to 15 GPX files, configure the poster,
-generate a preview, and download PDF, PNG, or JPEG output. Uploaded files and
-generated artifacts expire automatically. Map tiles are retained in the
+Open <http://localhost:8000>, upload up to 15 GPX or FIT files, configure the
+poster, generate a preview, and download PDF, PNG, or JPEG output. Uploaded files
+and generated artifacts expire automatically. Map tiles are retained in the
 `poster-cache` Docker volume.
 
 The service binds to localhost by default. Configure authentication and a TLS
@@ -44,7 +45,7 @@ uv run outdoor-maps-web
 
 - [uv](https://docs.astral.sh/uv/)
 - Internet access for the first map render
-- GPX track or route files
+- GPX track/route files or positioned FIT activity/course files
 
 Install `uv` on Windows with the official standalone installer, then open a new
 PowerShell window so the updated `PATH` is loaded:
@@ -59,7 +60,7 @@ environment or `pip install` step is needed.
 
 ## CLI quick start
 
-Put GPX files in `data/` (they are ignored by Git), then run:
+Put GPX and/or FIT files in `data/` (they are ignored by Git), then run:
 
 ```shell
 uv sync

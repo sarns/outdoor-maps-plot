@@ -58,7 +58,7 @@ STYLES = {
 PROVIDERS = ("opentopo", "esri", "stadia", "thunderforest")
 
 ATTRIBUTIONS = {
-    "esri": "MAP: © ESRI AND ITS DATA SUPPLIERS  /  ROUTE: USER-PROVIDED GPX",
+    "esri": "MAP: © ESRI AND ITS DATA SUPPLIERS  /  ROUTE: USER-PROVIDED TRACK",
     "stadia": (
         "© STADIA MAPS  /  © STAMEN DESIGN  /  © OPENMAPTILES  /  © OPENSTREETMAP CONTRIBUTORS"
     ),

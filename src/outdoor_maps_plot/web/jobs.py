@@ -190,7 +190,7 @@ class JobManager:
         job.cancellation.raise_if_cancelled()
         safe_message = {
             "validating": "Validating poster configuration",
-            "parsing": "Preparing GPX routes",
+            "parsing": "Preparing routes",
             "fetching_map": "Preparing topographic map",
             "drawing": "Drawing poster",
             "rasterizing": "Preparing image output",

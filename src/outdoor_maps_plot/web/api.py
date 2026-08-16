@@ -141,16 +141,16 @@ def get_config(request: Request) -> dict[str, object]:
 @router.post("/api/uploads", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 def create_upload(
     request: Request,
-    files: Annotated[list[UploadFile], File(description="One to fifteen GPX files")],
+    files: Annotated[list[UploadFile], File(description="One to fifteen GPX or FIT files")],
 ) -> UploadResponse:
     settings, storage, _ = _state(request)
     if not files:
-        raise ApiError(422, "missing_files", "Select at least one GPX file.")
+        raise ApiError(422, "missing_files", "Select at least one GPX or FIT file.")
     if len(files) > settings.max_files:
         raise ApiError(
             413,
             "too_many_files",
-            f"A maximum of {settings.max_files} GPX files may be uploaded.",
+            f"A maximum of {settings.max_files} GPX or FIT files may be uploaded.",
             [{"limit": settings.max_files}],
         )
     upload_id, workspace = storage.create_workspace()
