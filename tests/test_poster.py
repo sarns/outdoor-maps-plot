@@ -36,6 +36,36 @@ def test_world_pixel_origin() -> None:
     assert world_pixel((0.0, 0.0), 0) == pytest.approx((128.0, 128.0))
 
 
+def test_small_route_uses_higher_resolution_source_tiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested_urls: list[str] = []
+
+    def fake_download(url: str, path: Path, **kwargs: object) -> None:
+        requested_urls.append(url)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (256, 256), "#d9dfd5").save(path)
+
+    monkeypatch.setattr(poster, "_download_tile", fake_download)
+    basemap, bounds = poster.make_basemap(
+        [(50.0195, 7.1127), (50.0460, 7.1558)],
+        target_aspect=1.6,
+        cache=tmp_path / "cache",
+        style_name="classic",
+        provider="opentopo",
+        zoom=10,
+        padding=0.06,
+        basemap_width=1200,
+        max_tiles=100,
+    )
+
+    with Image.open(basemap) as image:
+        assert image.width >= 1200
+    assert bounds == poster._fit_bounds([(50.0195, 7.1127), (50.0460, 7.1558)], 10, 1.6, 0.06)
+    assert requested_urls
+    assert all(int(url.rsplit("/", 3)[-3]) > 10 for url in requested_urls)
+
+
 def test_line_simplification() -> None:
     points = [(0.0, 0.0), (1.0, 0.01), (2.0, 0.0)]
     assert simplify_line(points, 0.1) == [(0.0, 0.0), (2.0, 0.0)]

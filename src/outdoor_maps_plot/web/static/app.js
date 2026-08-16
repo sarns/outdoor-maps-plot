@@ -20,6 +20,7 @@
     route,
     default_provider,
   }));
+  const FALLBACK_ROUTE_EXTENSIONS = [".gpx", ".fit"];
 
   const state = {
     apiConfig: null,
@@ -240,6 +241,20 @@
       .replace(/(^|[-_ ])\w/g, (letter) => letter.toUpperCase());
   }
 
+  function routeExtensions() {
+    const configured = state.apiConfig?.route_extensions;
+    if (!Array.isArray(configured)) return FALLBACK_ROUTE_EXTENSIONS;
+    const extensions = configured
+      .map((value) => String(value).trim().toLowerCase())
+      .filter((value) => /^\.[a-z0-9]+$/.test(value));
+    return extensions.length ? extensions : FALLBACK_ROUTE_EXTENSIONS;
+  }
+
+  function fileExtension(filename) {
+    const dot = filename.lastIndexOf(".");
+    return dot >= 0 ? filename.slice(dot).toLowerCase() : "";
+  }
+
   function addFiles(fileList) {
     clearError();
     const limits = state.apiConfig?.limits || {};
@@ -247,9 +262,11 @@
     const maxBytes = Number(limits.max_file_bytes || 25 * 1024 ** 2);
     const totalMax = Number(limits.max_upload_bytes || 100 * 1024 ** 2);
     const incoming = [...fileList];
-    const invalid = incoming.find((file) => !/\.(gpx|fit)$/i.test(file.name));
+    const extensions = routeExtensions();
+    const invalid = incoming.find((file) => !extensions.includes(fileExtension(file.name)));
     if (invalid) {
-      showError(new Error(`${invalid.name} is not a GPX or FIT file.`), "Choose route tracks");
+      const formats = extensions.map((extension) => extension.slice(1).toUpperCase()).join(" or ");
+      showError(new Error(`${invalid.name} is not a ${formats} file.`), "Choose route tracks");
       return;
     }
     const oversized = incoming.find((file) => file.size > maxBytes);

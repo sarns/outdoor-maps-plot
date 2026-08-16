@@ -53,9 +53,9 @@ def test_index_has_unique_ids_and_programmatic_labels() -> None:
 
     assert len(inspector.ids) == len(set(inspector.ids))
     assert set(inspector.labels) <= set(inspector.controls)
-    assert "/static/theme.js" in inspector.scripts
-    assert "/static/app.js" in inspector.scripts
-    assert "/static/app.css" in inspector.stylesheets
+    assert any(source.startswith("/static/theme.js?v=") for source in inspector.scripts)
+    assert any(source.startswith("/static/app.js?v=") for source in inspector.scripts)
+    assert any(source.startswith("/static/app.css?v=") for source in inspector.stylesheets)
 
 
 def test_every_poster_config_field_is_represented() -> None:
@@ -100,7 +100,8 @@ def test_ui_has_no_runtime_cdn_and_supports_documented_workflow() -> None:
     assert 'createRender("preview")' in javascript
     assert 'createRender("final")' in javascript
     assert 'accept=".gpx,.fit,application/gpx+xml,application/vnd.ant.fit"' in html
-    assert "/\\.(gpx|fit)$/i" in javascript
+    assert 'const FALLBACK_ROUTE_EXTENSIONS = [".gpx", ".fit"]' in javascript
+    assert "state.apiConfig?.route_extensions" in javascript
 
 
 def test_ui_supports_persistent_light_and_dark_themes() -> None:

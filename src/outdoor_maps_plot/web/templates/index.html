@@ -7,9 +7,9 @@
     <meta name="theme-color" content="#18372f">
     <meta name="csrf-token" content="{{ csrf_token | default('', true) }}">
     <title>Outdoor Maps Plot</title>
-    <script src="/static/theme.js"></script>
-    <link rel="stylesheet" href="/static/app.css">
-    <script src="/static/app.js" defer></script>
+    <script src="/static/theme.js?v={{ static_version }}"></script>
+    <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
+    <script src="/static/app.js?v={{ static_version }}" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to poster builder</a>

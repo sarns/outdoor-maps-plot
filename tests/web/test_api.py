@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import time
 from pathlib import Path
@@ -121,15 +122,22 @@ def test_config_root_health_and_security_headers(client: TestClient) -> None:
     assert root.status_code == 200
     assert "Outdoor Maps Plot" in root.text
     assert root.headers["x-content-type-options"] == "nosniff"
+    assert root.headers["cache-control"] == "no-cache"
+    version_match = re.search(r"/static/app\.js\?v=([a-f0-9]{12})", root.text)
+    assert version_match
     static = client.get("/static/app.js")
     assert static.status_code == 200
     assert "application/javascript" in static.headers["content-type"]
+    assert static.headers["cache-control"] == "no-cache"
+    versioned_static = client.get(f"/static/app.js?v={version_match.group(1)}")
+    assert versioned_static.headers["cache-control"] == ("public, max-age=31536000, immutable")
 
     config = client.get("/api/config")
     assert config.status_code == 200
     body = config.json()
     assert body["limits"]["max_files"] == 15
     assert body["limits"]["hard_max_files"] == 15
+    assert body["route_extensions"] == [".fit", ".gpx"]
     assert body["defaults"]["orientation"] == "landscape"
     assert {"pdf", "png", "jpeg"} == set(body["output_formats"])
     assert all("key" not in provider for provider in body["providers"])

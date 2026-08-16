@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
@@ -21,6 +22,15 @@ from outdoor_maps_plot.web.jobs import JobManager, RenderCallable
 from outdoor_maps_plot.web.storage import WorkspaceStore
 
 
+def _static_version(static_root: Path) -> str:
+    """Return a stable content fingerprint for browser cache busting."""
+    digest = hashlib.sha256()
+    for path in sorted(item for item in static_root.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(static_root).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
 def create_app(
     settings: WebSettings | None = None,
     render_service: RenderCallable = render_poster,
@@ -29,6 +39,7 @@ def create_app(
     web_root = Path(__file__).resolve().parent
     template_root = web_root / "templates"
     static_root = web_root / "static"
+    static_version = _static_version(static_root)
     storage = WorkspaceStore(resolved_settings)
     jobs = JobManager(resolved_settings, storage, render_service)
 
@@ -78,6 +89,15 @@ def create_app(
             "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'"
         )
+        if request.url.path == "/":
+            # Revalidate the document so deployments can advertise new asset URLs.
+            response.headers["Cache-Control"] = "no-cache"
+        elif request.url.path.startswith("/static/"):
+            if request.query_params.get("v") == static_version:
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                # Legacy, unversioned asset URLs must not become stale again.
+                response.headers["Cache-Control"] = "no-cache"
         return response
 
     install_error_handlers(app)
@@ -89,7 +109,11 @@ def create_app(
     def index(request: Request):
         index_path = template_root / "index.html"
         if index_path.is_file():
-            return app.state.templates.TemplateResponse(request, "index.html", {})
+            return app.state.templates.TemplateResponse(
+                request,
+                "index.html",
+                {"static_version": static_version},
+            )
         return HTMLResponse(
             "<!doctype html><html><head><title>Outdoor Maps Plot</title></head>"
             "<body><main><h1>Outdoor Maps Plot</h1>"

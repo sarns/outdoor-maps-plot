@@ -294,9 +294,39 @@ def make_basemap(
             "Choose a lower --zoom or raise --max-tiles deliberately."
         )
 
+    # A compact route can cover only a few dozen source pixels at the requested
+    # zoom. Enlarging that crop to the configured basemap width makes labels and
+    # terrain visibly blocky. Fetch higher-zoom tiles for the same geographic
+    # bounds when the tile budget permits, treating ``zoom`` as the minimum map
+    # detail level. The returned bounds remain in the requested zoom's coordinate
+    # space so route projection is unchanged.
+    maximum_source_zoom = 17 if provider == "opentopo" else 19
+    source_zoom = zoom
+    source_bounds = bounds
+    required_steps = max(0, math.ceil(math.log2(basemap_width / (right - left))))
+    target_source_zoom = min(maximum_source_zoom, zoom + required_steps)
+    for candidate_zoom in range(zoom + 1, target_source_zoom + 1):
+        factor = 2 ** (candidate_zoom - zoom)
+        candidate_bounds = tuple(value * factor for value in bounds)
+        candidate_left, candidate_top, candidate_right, candidate_bottom = candidate_bounds
+        candidate_x0 = math.floor(candidate_left / 256)
+        candidate_x1 = math.floor((candidate_right - 1e-9) / 256)
+        candidate_y0 = math.floor(candidate_top / 256)
+        candidate_y1 = math.floor((candidate_bottom - 1e-9) / 256)
+        candidate_tile_count = (candidate_x1 - candidate_x0 + 1) * (candidate_y1 - candidate_y0 + 1)
+        if candidate_tile_count > max_tiles:
+            break
+        source_zoom = candidate_zoom
+        source_bounds = candidate_bounds
+        x0, x1 = candidate_x0, candidate_x1
+        y0, y1 = candidate_y0, candidate_y1
+        tile_count = candidate_tile_count
+
+    source_left, source_top, source_right, source_bottom = source_bounds
+
     cache.mkdir(parents=True, exist_ok=True)
     cache_key = hashlib.sha256(
-        f"{style_name}|{provider}|{zoom}|{bounds}|{basemap_width}".encode()
+        f"{style_name}|{provider}|{source_zoom}|{source_bounds}|{basemap_width}".encode()
     ).hexdigest()[:16]
     output = cache / "basemaps" / f"{cache_key}.png"
     if output.exists():
@@ -315,10 +345,10 @@ def make_basemap(
     for tile_y in range(y0, y1 + 1):
         for tile_x in range(x0, x1 + 1):
             _check_cancellation(cancellation_check)
-            tile_path = tile_dir / str(zoom) / str(tile_x) / f"{tile_y}.png"
+            tile_path = tile_dir / str(source_zoom) / str(tile_x) / f"{tile_y}.png"
             if not tile_path.exists():
                 _download_tile(
-                    _tile_url(provider, zoom, tile_x, tile_y),
+                    _tile_url(provider, source_zoom, tile_x, tile_y),
                     tile_path,
                     cancellation_check=cancellation_check,
                 )
@@ -340,10 +370,10 @@ def make_basemap(
 
     _check_cancellation(cancellation_check)
     crop = (
-        round(left - x0 * 256),
-        round(top - y0 * 256),
-        round(right - x0 * 256),
-        round(bottom - y0 * 256),
+        round(source_left - x0 * 256),
+        round(source_top - y0 * 256),
+        round(source_right - x0 * 256),
+        round(source_bottom - y0 * 256),
     )
     basemap = mosaic.crop(crop)
     _check_cancellation(cancellation_check)

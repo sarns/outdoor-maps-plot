@@ -10,7 +10,7 @@ from typing import Annotated, cast
 from fastapi import APIRouter, File, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
-from outdoor_maps_plot.gpx import PointBudget
+from outdoor_maps_plot.gpx import SUPPORTED_ROUTE_EXTENSIONS, PointBudget
 from outdoor_maps_plot.options import NAMED_PAPER_SIZES, PosterConfig
 from outdoor_maps_plot.styles import PROVIDERS, STYLES
 from outdoor_maps_plot.web.config import HARD_MAX_FILES, WebSettings
@@ -134,6 +134,7 @@ def get_config(request: Request) -> dict[str, object]:
             "max_points": settings.max_points_total,
             "max_tiles": settings.max_tiles,
         },
+        "route_extensions": sorted(SUPPORTED_ROUTE_EXTENSIONS),
         "output_formats": ["pdf", "png", "jpeg"],
     }
 
