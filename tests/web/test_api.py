@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
@@ -352,14 +353,23 @@ def test_expected_poster_errors_are_actionable(
             "/api/renders",
             json={"upload_id": uploaded["upload_id"], "config": {"paper_size": "300x400mm"}},
         )
-        result = wait_for_terminal(local, accepted.json()["job_id"])
+        job_id = accepted.json()["job_id"]
+        result = wait_for_terminal(local, job_id)
+        events = local.get(f"/api/renders/{job_id}/events")
 
     assert result["status"] == "failed"
-    assert result["error"] == {
+    expected_error = {
         "code": "poster_error",
         "message": "The selected extent requires too many map tiles; lower the zoom.",
         "details": [],
     }
+    assert result["error"] == expected_error
+    event_data = next(
+        line.removeprefix("data: ")
+        for line in events.text.splitlines()
+        if line.startswith("data: ")
+    )
+    assert json.loads(event_data)["error"] == expected_error
 
 
 def test_render_errors_are_safe(client: TestClient, settings: WebSettings) -> None:

@@ -291,9 +291,17 @@ def make_basemap(
     y0, y1 = math.floor(top / 256), math.floor((bottom - 1e-9) / 256)
     tile_count = (x1 - x0 + 1) * (y1 - y0 + 1)
     if tile_count > max_tiles:
+        if zoom > 0:
+            recovery = (
+                f"Reduce Map zoom from {zoom} to {zoom - 1} and try again. "
+                "In the web app, Map zoom is under Advanced options."
+            )
+        else:
+            recovery = "Reduce the route extent or increase Maximum tiles and try again."
         raise PosterError(
-            f"The selected zoom needs {tile_count} map tiles, over the {max_tiles} tile limit. "
-            "Choose a lower --zoom or raise --max-tiles deliberately."
+            f"This route area requires {tile_count} map tiles at Map zoom {zoom}, but this "
+            f"render is limited to {max_tiles}. {recovery} For a final poster, increasing "
+            "Maximum tiles is also possible when the server limit allows it."
         )
 
     # A compact route can cover only a few dozen source pixels at the requested

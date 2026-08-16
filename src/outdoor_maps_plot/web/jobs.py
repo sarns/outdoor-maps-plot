@@ -318,5 +318,6 @@ def event_json(job: RenderJob) -> str:
                 "message": job.progress.message,
                 "updated_at": job.progress.updated_at.isoformat(),
             },
+            "error": job.error.model_dump(mode="json") if job.error is not None else None,
         }
     )
