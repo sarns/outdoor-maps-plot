@@ -1,6 +1,19 @@
 (() => {
   "use strict";
 
+  const FALLBACK_ROUTE_PALETTES = {
+    "classic": ["#E4431B", "#147D92", "#C18A17", "#76549A", "#2F7A4F"],
+    "muted-alpine": ["#ED5B2A", "#397C78", "#B98A3D", "#7B648C", "#557A45"],
+    "monochrome-relief": ["#E44A24", "#167D9A", "#C68B00", "#6B58A6", "#23845C"],
+    "vintage-expedition": ["#B8422D", "#A57C24", "#35634C", "#4F5D75", "#7A4E62"],
+    "cool-minimal": ["#153F63", "#247B78", "#B65C3A", "#6B5B95", "#4F772D"],
+    "dark-topographic": ["#FF6338", "#3FC7D3", "#F2C94C", "#B692F6", "#5DD39E"],
+    "high-contrast-hiking": ["#E22E1B", "#005F99", "#247A37", "#6F42A8", "#A86400"],
+    "esri-topographic": ["#E84B22", "#176B87", "#2F7D55", "#7251A2", "#B27A00"],
+    "stamen-terrain": ["#E34B25", "#17758A", "#347B4D", "#73549B", "#AD7900"],
+    "thunderforest-outdoors": ["#E43F20", "#116F8A", "#287A48", "#6D4F9C", "#B47500"],
+  };
+
   const FALLBACK_STYLES = [
     ["classic", "Classic Topographic", "#F2EFE6", "#17332B", "#E4431B", "opentopo"],
     ["muted-alpine", "Muted Alpine", "#F3F0E8", "#19372F", "#ED5B2A", "opentopo"],
@@ -19,6 +32,7 @@
     ink,
     route,
     default_provider,
+    route_palette: FALLBACK_ROUTE_PALETTES[id],
   }));
   const FALLBACK_ROUTE_EXTENSIONS = [".gpx", ".fit"];
 
@@ -437,6 +451,7 @@
       simplify_points: Number(data.get("simplify_points")),
       route_width: Number(data.get("route_width")),
       route_color: byId("use-style-route-color").checked ? null : byId("route-color").value,
+      route_color_mode: data.get("route_color_mode") || "single",
       route_order: data.get("route_order") || "auto",
       output_format: data.get("output_format") || "pdf",
       dpi: Number(data.get("dpi")),
@@ -502,13 +517,26 @@
   function syncControls() {
     const config = collectConfig();
     const useStyleRouteColor = byId("use-style-route-color").checked;
+    const paletteMode = config.route_color_mode === "palette";
     const routeColor = byId("route-color");
-    routeColor.disabled = useStyleRouteColor;
+    routeColor.disabled = useStyleRouteColor || paletteMode;
+    byId("use-style-route-color").disabled = paletteMode;
+    const selectedStyle = configStyles(state.apiConfig)
+      .find((style) => style.id === config.style_name);
     if (useStyleRouteColor) {
-      const selectedStyle = configStyles(state.apiConfig)
-        .find((style) => style.id === config.style_name);
       routeColor.value = selectedStyle?.route || "#E4431B";
     }
+    const palette = Array.isArray(selectedStyle?.route_palette)
+      ? selectedStyle.route_palette
+      : [selectedStyle?.route || routeColor.value];
+    const palettePreview = byId("route-palette-preview");
+    palettePreview.replaceChildren();
+    palette.forEach((color) => {
+      const swatch = document.createElement("span");
+      swatch.style.backgroundColor = color;
+      palettePreview.append(swatch);
+    });
+    palettePreview.hidden = !paletteMode;
     const custom = byId("paper-size").value === "custom";
     byId("custom-paper").hidden = !custom;
     const raster = config.output_format !== "pdf";
@@ -746,6 +774,7 @@
       paper_size: "A3",
       orientation: "landscape",
       style_name: "classic",
+      route_color_mode: "single",
       output_format: "pdf",
     });
     clearFieldErrors();

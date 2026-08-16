@@ -131,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the track color selected by the style",
     )
     parser.add_argument(
+        "--route-color-mode",
+        choices=("single", "palette"),
+        default="single",
+        help="use one track color or cycle the selected style's palette",
+    )
+    parser.add_argument(
         "--simplify",
         type=_positive_float("simplification tolerance", allow_zero=True),
         default=0.35,
@@ -218,6 +224,7 @@ def main(argv: list[str] | None = None) -> None:
             simplify_points=args.simplify,
             route_width=args.route_width,
             route_color=args.route_color,
+            route_color_mode=args.route_color_mode,
             route_order=args.route_order,
             output_format=output_format,
             dpi=args.dpi,

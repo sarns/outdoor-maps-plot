@@ -93,6 +93,7 @@ a north-to-south itinerary using their nearest endpoints. Use
 --padding 6                 Route bounds padding in percent
 --route-width 3.5           Route line width in points at A3
 --route-color "#2B6CB0"     Override the track color with #RRGGBB
+--route-color-mode palette   Give each track a style-matched palette color
 --tile-provider esri        Override the style's map provider
 ```
 

@@ -98,6 +98,21 @@
           </label>
         </div>
       </div>
+      <fieldset class="field">
+        <legend class="field-label">Track coloring</legend>
+        <div class="segmented">
+          <label>
+            <input type="radio" name="route_color_mode" value="single" checked>
+            <span>One color</span>
+          </label>
+          <label>
+            <input type="radio" name="route_color_mode" value="palette">
+            <span>Style palette</span>
+          </label>
+        </div>
+        <div id="route-palette-preview" class="palette-preview" aria-hidden="true" hidden></div>
+        <small class="help-text">Give each track a different color chosen for the selected map style.</small>
+      </fieldset>
       <div class="field">
         <div class="range-heading">
           <label for="padding-percent">Map padding</label>

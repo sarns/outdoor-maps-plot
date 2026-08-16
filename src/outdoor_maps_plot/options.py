@@ -12,6 +12,7 @@ from outdoor_maps_plot.styles import PROVIDERS, STYLES
 Orientation = Literal["landscape", "portrait"]
 OutputFormat = Literal["pdf", "png", "jpeg"]
 RouteOrder = Literal["auto", "input"]
+RouteColorMode = Literal["single", "palette"]
 
 NAMED_PAPER_SIZES = ("A0", "A1", "A2", "A3", "A4", "A5", "LETTER", "LEGAL", "TABLOID")
 CUSTOM_PAPER_PATTERN = re.compile(
@@ -200,6 +201,16 @@ class PosterConfig(BaseModel):
             "Override the track color supplied by the selected topographic style.",
         ),
     )
+    route_color_mode: RouteColorMode = Field(
+        default="single",
+        description="Use one route color or cycle the selected style's route palette.",
+        json_schema_extra=_ui(
+            "Track coloring",
+            "route",
+            "Use one color for every track or a distinct style-matched color per track.",
+            choices=("single", "palette"),
+        ),
+    )
     route_order: RouteOrder = Field(
         default="auto",
         description="Automatic endpoint ordering or input order.",
@@ -296,3 +307,9 @@ class PosterConfig(BaseModel):
     @property
     def effective_route_color(self) -> str:
         return self.route_color or STYLES[self.style_name].route
+
+    @property
+    def effective_route_palette(self) -> tuple[str, ...]:
+        if self.route_color_mode == "palette":
+            return STYLES[self.style_name].route_palette
+        return (self.effective_route_color,)

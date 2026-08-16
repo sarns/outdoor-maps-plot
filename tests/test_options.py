@@ -28,3 +28,11 @@ def test_route_color_override_is_normalized_and_validated() -> None:
     assert PosterConfig(route_color="#2b6cb0").effective_route_color == "#2B6CB0"
     with pytest.raises(ValidationError, match="six-digit hexadecimal"):
         PosterConfig(route_color="blue")
+
+
+def test_route_palette_tracks_the_selected_style() -> None:
+    config = PosterConfig(style_name="dark-topographic", route_color_mode="palette")
+
+    assert len(config.effective_route_palette) >= 5
+    assert config.effective_route_palette[0] == config.effective_route_color
+    assert len(set(config.effective_route_palette)) == len(config.effective_route_palette)

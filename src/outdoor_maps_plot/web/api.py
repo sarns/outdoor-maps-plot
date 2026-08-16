@@ -114,6 +114,7 @@ def get_config(request: Request) -> dict[str, object]:
                 "ink": style.ink,
                 "muted": style.muted,
                 "route": style.route,
+                "route_palette": list(style.route_palette),
                 "halo": style.halo,
                 "default_provider": style.provider,
             }

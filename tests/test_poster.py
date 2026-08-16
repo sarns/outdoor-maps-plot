@@ -72,6 +72,72 @@ def test_line_simplification() -> None:
     assert simplify_line(points, 0.001) == points
 
 
+def test_route_colors_use_and_cycle_the_style_palette() -> None:
+    config = poster.PosterConfig(style_name="cool-minimal", route_color_mode="palette")
+
+    colors = poster._route_colors(config, 7)
+
+    assert colors[:5] == list(config.effective_route_palette)
+    assert colors[5:] == list(config.effective_route_palette[:2])
+    assert poster._route_colors(poster.PosterConfig(route_color="#123456"), 3) == [
+        "#123456",
+        "#123456",
+        "#123456",
+    ]
+
+
+def test_palette_colors_are_used_during_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    routes = [
+        Route(
+            name=f"Stage {index + 1}",
+            segments=[[(47.0 + index * 0.02, 10.0), (47.01 + index * 0.02, 10.01)]],
+            distance_km=2.0,
+            ascent_m=50.0,
+        )
+        for index in range(2)
+    ]
+
+    def fake_basemap(*args: object, **kwargs: object):
+        image_path = tmp_path / "palette-basemap.png"
+        Image.new("RGB", (600, 800), "#d9dfd5").save(image_path)
+        pixels = [world_pixel(point, 10) for route in routes for point in route.points]
+        return image_path, (
+            min(point[0] for point in pixels) - 10,
+            min(point[1] for point in pixels) - 10,
+            max(point[0] for point in pixels) + 10,
+            max(point[1] for point in pixels) + 10,
+        )
+
+    monkeypatch.setattr(poster, "make_basemap", fake_basemap)
+    requested_colors: list[str] = []
+    original_hex_color = poster.HexColor
+
+    def recording_hex_color(value: str):
+        requested_colors.append(value)
+        return original_hex_color(value)
+
+    monkeypatch.setattr(poster, "HexColor", recording_hex_color)
+    output = tmp_path / "palette.pdf"
+
+    create_poster(
+        routes,
+        output,
+        "pdf",
+        tmp_path / "cache",
+        PosterOptions(
+            paper_size="A5",
+            basemap_width=512,
+            style_name="cool-minimal",
+            route_color_mode="palette",
+        ),
+    )
+
+    assert output.read_bytes().startswith(b"%PDF")
+    assert {"#153F63", "#247B78"} <= set(requested_colors)
+
+
 @pytest.mark.parametrize(
     ("output_format", "suffix", "signature"),
     (("pdf", ".pdf", b"%PDF"), ("png", ".png", b"\x89PNG")),

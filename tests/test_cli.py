@@ -53,6 +53,8 @@ def test_cli_maps_arguments_to_shared_configuration(
             "input",
             "--route-color",
             "#2b6cb0",
+            "--route-color-mode",
+            "palette",
             "--padding",
             "12",
         ]
@@ -65,6 +67,7 @@ def test_cli_maps_arguments_to_shared_configuration(
     assert config.style_name == "cool-minimal"
     assert config.route_order == "input"
     assert config.route_color == "#2B6CB0"
+    assert config.route_color_mode == "palette"
     assert config.padding_percent == 12
     assert config.output_format == "png"
     assert Path(captured["destination"]).suffix == ".png"

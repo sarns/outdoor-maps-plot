@@ -74,6 +74,7 @@ def test_every_poster_config_field_is_represented() -> None:
         "simplify_points",
         "route_width",
         "route_color",
+        "route_color_mode",
         "route_order",
         "output_format",
         "dpi",
@@ -102,6 +103,8 @@ def test_ui_has_no_runtime_cdn_and_supports_documented_workflow() -> None:
     assert 'accept=".gpx,.fit,application/gpx+xml,application/vnd.ant.fit"' in html
     assert 'const FALLBACK_ROUTE_EXTENSIONS = [".gpx", ".fit"]' in javascript
     assert "state.apiConfig?.route_extensions" in javascript
+    assert "selectedStyle?.route_palette" in javascript
+    assert 'config.route_color_mode === "palette"' in javascript
 
 
 def test_ui_supports_persistent_light_and_dark_themes() -> None:

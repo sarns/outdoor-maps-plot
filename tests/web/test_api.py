@@ -138,6 +138,8 @@ def test_config_root_health_and_security_headers(client: TestClient) -> None:
     assert body["limits"]["max_files"] == 15
     assert body["limits"]["hard_max_files"] == 15
     assert body["route_extensions"] == [".fit", ".gpx"]
+    assert all(len(style["route_palette"]) >= 5 for style in body["styles"])
+    assert all(style["route_palette"][0] == style["route"] for style in body["styles"])
     assert body["defaults"]["orientation"] == "landscape"
     assert {"pdf", "png", "jpeg"} == set(body["output_formats"])
     assert all("key" not in provider for provider in body["providers"])

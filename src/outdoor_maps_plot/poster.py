@@ -66,6 +66,7 @@ class PosterOptions:
     simplify_points: float = 0.35
     route_width: float = 3.5
     route_color: str | None = None
+    route_color_mode: str = "single"
     dpi: int = 300
     jpeg_quality: int = 92
 
@@ -85,6 +86,7 @@ class PosterOptions:
             simplify_points=self.simplify_points,
             route_width=self.route_width,
             route_color=self.route_color,
+            route_color_mode=self.route_color_mode,
             output_format="jpeg" if output_format == "jpg" else output_format,
             dpi=self.dpi,
             jpeg_quality=self.jpeg_quality,
@@ -478,6 +480,11 @@ def _draw_route_paths(
             canvas.drawPath(path, stroke=1, fill=0)
 
 
+def _route_colors(config: PosterConfig, count: int) -> list[str]:
+    palette = config.effective_route_palette
+    return [palette[index % len(palette)] for index in range(count)]
+
+
 def _render_pdf(
     routes: list[Route],
     output: Path,
@@ -491,7 +498,7 @@ def _render_pdf(
     if not routes:
         raise PosterError("At least one usable route is required")
     style: Style = STYLES[config.style_name]
-    route_color = config.effective_route_color
+    route_colors = _route_colors(config, len(routes))
     provider = config.effective_provider
     page_w, page_h = oriented_page_size(config.paper_size, config.orientation)
     reference_w, reference_h = oriented_page_size("A3", config.orientation)
@@ -566,17 +573,18 @@ def _render_pdf(
         config.simplify_points * scale,
         cancellation_check,
     )
-    canvas.setStrokeColor(HexColor(route_color))
     canvas.setLineWidth(config.route_width * scale)
-    _draw_route_paths(
-        canvas,
-        routes,
-        project,
-        config.simplify_points * scale,
-        cancellation_check,
-    )
+    for route, route_color in zip(routes, route_colors, strict=True):
+        canvas.setStrokeColor(HexColor(route_color))
+        _draw_route_paths(
+            canvas,
+            [route],
+            project,
+            config.simplify_points * scale,
+            cancellation_check,
+        )
 
-    for route in routes:
+    for route, route_color in zip(routes, route_colors, strict=True):
         _check_cancellation(cancellation_check)
         for point in (route.start, route.end):
             x, y = project(point)
@@ -627,7 +635,7 @@ def _render_pdf(
         column, row = index % columns, index // columns
         x = margin + column * column_width
         y = footer_h - 2 * scale - row * 51 * scale
-        canvas.setFillColor(HexColor(style.route))
+        canvas.setFillColor(HexColor(route_colors[index]))
         canvas.setFont("Helvetica-Bold", 8 * scale)
         canvas.drawString(x, y, f"{index + 1:02d}")
         canvas.setFillColor(HexColor(style.ink))
