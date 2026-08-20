@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import zipfile
 
+import lib3mf
 import pytest
 from pydantic import ValidationError
 
@@ -76,16 +77,20 @@ def test_writes_four_material_3mf_in_millimetres(tmp_path) -> None:
         elevation_attribution="Mapzen Terrain Tiles test attribution",
     )
     with zipfile.ZipFile(destination) as archive:
-        assert set(archive.namelist()) == {
-            "[Content_Types].xml",
-            "_rels/.rels",
-            "3D/3dmodel.model",
-        }
+        assert {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"}.issubset(
+            archive.namelist()
+        )
         root = ET.fromstring(archive.read("3D/3dmodel.model"))
     namespace = {"m": CORE_NS}
     assert root.attrib["unit"] == "millimeter"
     metadata = {item.attrib["name"]: item.text for item in root.findall("m:metadata", namespace)}
-    assert "Mapzen Terrain Tiles" in metadata["ElevationData"]
+    elevation_key = next(name for name in metadata if name.endswith(":ElevationData"))
+    assert "Mapzen Terrain Tiles" in metadata[elevation_key]
     assert len(root.findall(".//m:basematerials/m:base", namespace)) == 4
     assert len(root.findall(".//m:object", namespace)) == 4
     assert len(root.findall(".//m:build/m:item", namespace)) == 4
+
+    wrapper = lib3mf.get_wrapper()
+    parsed = wrapper.CreateModel()
+    parsed.QueryReader("3mf").ReadFromFile(str(destination))
+    assert parsed.GetUnit() == lib3mf.ModelUnit.MilliMeter

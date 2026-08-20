@@ -1,18 +1,19 @@
-"""Minimal standards-based 3MF writer for four-material relief models."""
+"""Standards-compliant 3MF export for four-material relief models."""
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
-import zipfile
+import os
+import tempfile
 from pathlib import Path
 
+import lib3mf
+
 from outdoor_maps_plot.mesh_validation import validate_relief_model
-from outdoor_maps_plot.relief import ReliefModel
+from outdoor_maps_plot.relief import Mesh, ReliefModel
 from outdoor_maps_plot.relief_options import ReliefConfig
 
 CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
-REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
-CONTENT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+APP_METADATA_NS = "https://github.com/sarns/outdoor-maps-plot/3mf/metadata/1"
 
 
 def write_3mf(
@@ -22,116 +23,114 @@ def write_3mf(
     *,
     elevation_attribution: str | None = None,
 ) -> Path:
-    """Validate and write a multi-object 3MF in millimetres."""
+    """Validate and atomically write a four-object 3MF in millimetres.
+
+    The package is produced and read back with the 3MF Consortium's reference
+    implementation. This avoids slicer-specific failures caused by subtly
+    invalid hand-written OPC or 3MF XML.
+    """
 
     validate_relief_model(model)
     if config is not None and tuple(body.color for body in model.bodies) != config.colors:
         raise ValueError("model material colors do not match ReliefConfig")
+
     destination = Path(destination)
     if destination.suffix.lower() != ".3mf":
         raise ValueError("3MF destination must use the .3mf extension")
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    parts = {
-        "[Content_Types].xml": _content_types_xml(),
-        "_rels/.rels": _relationships_xml(),
-        "3D/3dmodel.model": _model_xml(model, elevation_attribution),
-    }
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name, content in parts.items():
-            archive.writestr(name, content)
+    wrapper = lib3mf.get_wrapper()
+    document = wrapper.CreateModel()
+    document.SetUnit(lib3mf.ModelUnit.MilliMeter)
+    _add_metadata(document, model, elevation_attribution)
+
+    materials = document.AddBaseMaterialGroup()
+    material_ids = [materials.AddMaterial(body.name, _color(body.color)) for body in model.bodies]
+    material_resource_id = materials.GetResourceID()
+    identity = wrapper.GetIdentityTransform()
+
+    for body, material_id in zip(model.bodies, material_ids, strict=True):
+        mesh = document.AddMeshObject()
+        mesh.SetName(body.name)
+        mesh.SetGeometry(_positions(body), _triangles(body))
+        mesh.SetObjectLevelProperty(material_resource_id, material_id)
+        document.AddBuildItem(mesh, identity)
+
+    temporary = _temporary_destination(destination)
+    try:
+        document.QueryWriter("3mf").WriteToFile(os.fspath(temporary))
+        _verify_package(wrapper, temporary)
+        temporary.replace(destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
     return destination
 
 
-def _model_xml(model: ReliefModel, elevation_attribution: str | None) -> bytes:
-    ET.register_namespace("", CORE_NS)
-    root = ET.Element(f"{{{CORE_NS}}}model", {"unit": "millimeter", "xml:lang": "en-US"})
-    metadata = ET.SubElement(root, f"{{{CORE_NS}}}metadata", {"name": "Title"})
-    metadata.text = "Outdoor Maps Plot relief"
-    metadata = ET.SubElement(root, f"{{{CORE_NS}}}metadata", {"name": "Application"})
-    metadata.text = "outdoor-maps-plot"
+def _add_metadata(document, model: ReliefModel, elevation_attribution: str | None) -> None:
+    metadata = document.GetMetaDataGroup()
+    metadata.AddMetaData("", "Title", "Outdoor Maps Plot relief", "xs:string", True)
+    metadata.AddMetaData("", "Application", "outdoor-maps-plot", "xs:string", True)
     if elevation_attribution:
-        metadata = ET.SubElement(root, f"{{{CORE_NS}}}metadata", {"name": "ElevationData"})
-        metadata.text = elevation_attribution
-    metadata = ET.SubElement(root, f"{{{CORE_NS}}}metadata", {"name": "ElevationRange"})
-    metadata.text = (
-        f"{model.source_elevation_range[0]:.3f}..{model.source_elevation_range[1]:.3f} m"
-    )
-    resources = ET.SubElement(root, f"{{{CORE_NS}}}resources")
-    materials = ET.SubElement(resources, f"{{{CORE_NS}}}basematerials", {"id": "1"})
-    for body in model.bodies:
-        ET.SubElement(
-            materials,
-            f"{{{CORE_NS}}}base",
-            {"name": body.name, "displaycolor": f"{body.color}FF"},
+        metadata.AddMetaData(
+            APP_METADATA_NS,
+            "ElevationData",
+            elevation_attribution,
+            "xs:string",
+            True,
         )
-    for material_index, body in enumerate(model.bodies):
-        object_element = ET.SubElement(
-            resources,
-            f"{{{CORE_NS}}}object",
-            {
-                "id": str(material_index + 2),
-                "name": body.name,
-                "type": "model",
-                "pid": "1",
-                "pindex": str(material_index),
-            },
-        )
-        mesh = ET.SubElement(object_element, f"{{{CORE_NS}}}mesh")
-        vertices = ET.SubElement(mesh, f"{{{CORE_NS}}}vertices")
-        for x, y, z in body.vertices:
-            ET.SubElement(
-                vertices,
-                f"{{{CORE_NS}}}vertex",
-                {"x": _number(x), "y": _number(y), "z": _number(z)},
-            )
-        triangles = ET.SubElement(mesh, f"{{{CORE_NS}}}triangles")
-        for v1, v2, v3 in body.triangles:
-            ET.SubElement(
-                triangles,
-                f"{{{CORE_NS}}}triangle",
-                {"v1": str(v1), "v2": str(v2), "v3": str(v3)},
-            )
-    build = ET.SubElement(root, f"{{{CORE_NS}}}build")
-    for object_id in range(2, 6):
-        ET.SubElement(build, f"{{{CORE_NS}}}item", {"objectid": str(object_id)})
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
-
-def _content_types_xml() -> bytes:
-    root = ET.Element(f"{{{CONTENT_NS}}}Types")
-    ET.SubElement(
-        root,
-        f"{{{CONTENT_NS}}}Default",
-        {
-            "Extension": "rels",
-            "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
-        },
+    metadata.AddMetaData(
+        APP_METADATA_NS,
+        "ElevationRange",
+        f"{model.source_elevation_range[0]:.3f}..{model.source_elevation_range[1]:.3f} m",
+        "xs:string",
+        True,
     )
-    ET.SubElement(
-        root,
-        f"{{{CONTENT_NS}}}Override",
-        {
-            "PartName": "/3D/3dmodel.model",
-            "ContentType": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
-        },
+
+
+def _positions(body: Mesh) -> list:
+    positions = []
+    for x, y, z in body.vertices:
+        position = lib3mf.Position()
+        position.Coordinates[0] = float(x)
+        position.Coordinates[1] = float(y)
+        position.Coordinates[2] = float(z)
+        positions.append(position)
+    return positions
+
+
+def _triangles(body: Mesh) -> list:
+    triangles = []
+    for v1, v2, v3 in body.triangles:
+        triangle = lib3mf.Triangle()
+        triangle.Indices[0] = v1
+        triangle.Indices[1] = v2
+        triangle.Indices[2] = v3
+        triangles.append(triangle)
+    return triangles
+
+
+def _color(hex_color: str):
+    color = lib3mf.Color()
+    color.Red = int(hex_color[1:3], 16)
+    color.Green = int(hex_color[3:5], 16)
+    color.Blue = int(hex_color[5:7], 16)
+    color.Alpha = 255
+    return color
+
+
+def _temporary_destination(destination: Path) -> Path:
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{destination.stem}-",
+        suffix=".3mf",
+        dir=destination.parent,
     )
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    os.close(descriptor)
+    temporary = Path(name)
+    temporary.unlink()
+    return temporary
 
 
-def _relationships_xml() -> bytes:
-    root = ET.Element(f"{{{REL_NS}}}Relationships")
-    ET.SubElement(
-        root,
-        f"{{{REL_NS}}}Relationship",
-        {
-            "Target": "/3D/3dmodel.model",
-            "Id": "rel0",
-            "Type": "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel",
-        },
-    )
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
-
-def _number(value: float) -> str:
-    return format(value, ".9g")
+def _verify_package(wrapper, path: Path) -> None:
+    verified = wrapper.CreateModel()
+    verified.QueryReader("3mf").ReadFromFile(os.fspath(path))

@@ -23,6 +23,15 @@ is distributed under the MIT License.
 
 - <https://github.com/polyvertex/fitdecode>
 
+## lib3mf
+
+`lib3mf` is the 3MF Consortium's reference implementation used to create and
+validate standards-compliant 3MF model packages. It is distributed under the
+BSD 2-Clause License and includes libzip, zlib, base64, and fast_float.
+
+- <https://github.com/3MFConsortium/lib3mf>
+- <https://github.com/3MFConsortium/lib3mf_python>
+
 ## Map data and rendered tiles
 
 Generated posters include attribution for the selected provider and its data
