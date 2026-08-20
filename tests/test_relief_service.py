@@ -44,6 +44,13 @@ class PartialWaterProvider(FakeWaterProvider):
         return WaterFeatures(features.areas, features.lines, complete=False)
 
 
+class ProgressWaterProvider(FakeWaterProvider):
+    def load(self, projection, bounds, **kwargs) -> WaterFeatures:
+        kwargs["progress"](1, 2)
+        kwargs["progress"](2, 2)
+        return super().load(projection, bounds, **kwargs)
+
+
 def _route() -> Route:
     return Route(
         name="Sample",
@@ -125,3 +132,20 @@ def test_render_relief_reports_partially_available_water(tmp_path: Path) -> None
     assert result.warnings == (
         "Some OpenStreetMap water tiles were unavailable; water geometry may be incomplete.",
     )
+
+
+def test_render_relief_reports_incremental_water_progress(tmp_path: Path) -> None:
+    events: list[ProgressEvent] = []
+    render_relief(
+        [_route()],
+        tmp_path / "relief-water-progress.3mf",
+        tmp_path / "cache",
+        ReliefConfig(width_mm=40, depth_mm=40, mesh_pitch_mm=10),
+        progress=events.append,
+        elevation_provider=FakeElevationProvider(),
+        water_provider=ProgressWaterProvider(),
+    )
+
+    water_messages = [event.message for event in events if event.phase == "fetching_water"]
+    assert "Loading lakes and rivers (1/2)" in water_messages
+    assert "Loading lakes and rivers (2/2)" in water_messages

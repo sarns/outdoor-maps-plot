@@ -141,6 +141,12 @@ def render_relief(
                 depth_mm=config.depth_mm,
                 minimum_line_width_mm=config.waterway_width_mm,
                 cancelled=lambda: token.cancelled,
+                progress=lambda completed, total: _report(
+                    progress,
+                    "fetching_water",
+                    52 + round(5 * completed / total),
+                    f"Loading lakes and rivers ({completed}/{total})",
+                ),
             )
             water_attribution = getattr(
                 mapped_water_provider,

@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -77,12 +78,13 @@ def test_osm_water_provider_uses_next_endpoint_after_network_failure() -> None:
 
     def fetch(url: str, _body: bytes, _limit: int) -> bytes:
         requested_urls.append(url)
-        if url.endswith("first.example/api"):
-            raise WaterError("first endpoint unavailable")
+        if len(requested_urls) == 1:
+            raise WaterError("selected endpoint unavailable")
         return _document()
 
     provider = OpenStreetMapWaterProvider(
         endpoints=("https://first.example/api", "https://second.example/api"),
+        max_endpoint_attempts=2,
         fetcher=fetch,
     )
     features = provider.load(
@@ -93,12 +95,14 @@ def test_osm_water_provider_uses_next_endpoint_after_network_failure() -> None:
         minimum_line_width_mm=1.2,
     )
 
-    assert requested_urls == ["https://first.example/api", "https://second.example/api"]
+    assert len(requested_urls) == 2
+    assert len(set(requested_urls)) == 2
     assert not features.empty
 
 
 def test_osm_water_provider_tiles_large_extents_and_deduplicates_features() -> None:
     requests: list[bytes] = []
+    progress: list[tuple[int, int]] = []
 
     def fetch(_url: str, body: bytes, _limit: int) -> bytes:
         requests.append(body)
@@ -106,7 +110,7 @@ def test_osm_water_provider_tiles_large_extents_and_deduplicates_features() -> N
 
     provider = OpenStreetMapWaterProvider(
         endpoints=("https://water.example/api",),
-        max_query_tiles=16,
+        max_query_tiles=4,
         target_tile_span_km=50,
         fetcher=fetch,
     )
@@ -116,10 +120,13 @@ def test_osm_water_provider_tiles_large_extents_and_deduplicates_features() -> N
         width_mm=100,
         depth_mm=100,
         minimum_line_width_mm=1.2,
+        progress=lambda completed, total: progress.append((completed, total)),
     )
 
-    assert 1 < len(requests) <= 16
+    assert 1 < len(requests) <= 4
+    assert progress == [(index, len(requests)) for index in range(1, len(requests) + 1)]
     assert all(b"stream" not in body for body in requests)
+    assert all(b"%22name%22" in body for body in requests)
     assert len(features.areas) == 1
     assert len(features.lines) == 1
     assert features.complete
@@ -152,3 +159,53 @@ def test_osm_water_provider_returns_partial_result_when_one_tile_fails() -> None
     assert queries_seen > 1
     assert not features.empty
     assert not features.complete
+
+
+def test_osm_water_provider_fetches_tiles_concurrently() -> None:
+    rendezvous = threading.Barrier(4, timeout=1)
+
+    def fetch(_url: str, _body: bytes, _limit: int) -> bytes:
+        rendezvous.wait()
+        return _document()
+
+    provider = OpenStreetMapWaterProvider(
+        endpoints=("https://water.example/api",),
+        max_query_tiles=4,
+        target_tile_span_km=50,
+        max_workers=4,
+        fetcher=fetch,
+    )
+    features = provider.load(
+        LocalMetricProjection(47.0, 10.0),
+        MetricBounds(-50_000, -50_000, 50_000, 50_000),
+        width_mm=100,
+        depth_mm=100,
+        minimum_line_width_mm=1.2,
+    )
+
+    assert not features.empty
+
+
+def test_osm_water_provider_enforces_total_deadline() -> None:
+    release_later = threading.Event()
+
+    def fetch(_url: str, _body: bytes, _limit: int) -> bytes:
+        release_later.wait(0.05)
+        return _document()
+
+    provider = OpenStreetMapWaterProvider(
+        endpoints=("https://water.example/api",),
+        total_timeout_seconds=0.01,
+        max_query_tiles=4,
+        target_tile_span_km=50,
+        max_workers=4,
+        fetcher=fetch,
+    )
+    with pytest.raises(WaterError, match="any map tile"):
+        provider.load(
+            LocalMetricProjection(47.0, 10.0),
+            MetricBounds(-50_000, -50_000, 50_000, 50_000),
+            width_mm=100,
+            depth_mm=100,
+            minimum_line_width_mm=1.2,
+        )

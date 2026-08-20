@@ -11,6 +11,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -19,6 +21,7 @@ from outdoor_maps_plot.projection import LocalMetricProjection, MetricBounds
 
 Point2D = tuple[float, float]
 CancelCheck = Callable[[], bool]
+WaterProgress = Callable[[int, int], None]
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_ENDPOINTS = (
     OVERPASS_URL,
@@ -74,6 +77,7 @@ class WaterProvider(Protocol):
         depth_mm: float,
         minimum_line_width_mm: float,
         cancelled: CancelCheck | None = None,
+        progress: WaterProgress | None = None,
     ) -> WaterFeatures: ...
 
 
@@ -89,19 +93,25 @@ class OpenStreetMapWaterProvider:
         cache_dir: Path | None = None,
         endpoint: str | None = None,
         endpoints: Sequence[str] | None = None,
-        timeout_seconds: float = 30.0,
-        max_response_bytes: int = 16 * 1024 * 1024,
-        max_coordinates: int = 250_000,
+        timeout_seconds: float = 6.0,
+        total_timeout_seconds: float = 20.0,
+        max_response_bytes: int = 64 * 1024 * 1024,
+        max_coordinates: int = 500_000,
         max_query_tiles: int = 16,
         target_tile_span_km: float = 50.0,
+        max_workers: int = 8,
+        max_endpoint_attempts: int = 1,
         fetcher: WaterFetcher | None = None,
     ) -> None:
         if (
             timeout_seconds <= 0
+            or total_timeout_seconds <= 0
             or max_response_bytes < 1024
             or max_coordinates < 10
             or not 1 <= max_query_tiles <= 64
             or target_tile_span_km <= 0
+            or not 1 <= max_workers <= 8
+            or not 1 <= max_endpoint_attempts <= 3
         ):
             raise WaterError("water provider resource limits must be positive")
         if endpoint is not None and endpoints is not None:
@@ -121,10 +131,13 @@ class OpenStreetMapWaterProvider:
         # Keep the original public attribute for callers that configured one endpoint.
         self.endpoint = configured_endpoints[0]
         self.timeout_seconds = timeout_seconds
+        self.total_timeout_seconds = total_timeout_seconds
         self.max_response_bytes = max_response_bytes
         self.max_coordinates = max_coordinates
         self.max_query_tiles = max_query_tiles
         self.target_tile_span_km = target_tile_span_km
+        self.max_workers = max_workers
+        self.max_endpoint_attempts = max_endpoint_attempts
         self.fetcher = fetcher or self._download
 
     @property
@@ -166,12 +179,19 @@ class OpenStreetMapWaterProvider:
         depth_mm: float,
         minimum_line_width_mm: float,
         cancelled: CancelCheck | None = None,
+        progress: WaterProgress | None = None,
     ) -> WaterFeatures:
         _check_cancelled(cancelled)
         south, west, north, east = _geo_bounds(projection, bounds)
-        include_minor_waterways = bounds.width / width_mm <= 200.0
+        metres_per_model_mm = bounds.width / width_mm
+        include_minor_waterways = metres_per_model_mm <= 200.0
+        major_water_only = metres_per_model_mm > 200.0
         queries = tuple(
-            _query(*tile, include_minor_waterways=include_minor_waterways)
+            _query(
+                *tile,
+                include_minor_waterways=include_minor_waterways,
+                major_water_only=major_water_only,
+            )
             for tile in _query_tiles(
                 south,
                 west,
@@ -186,41 +206,62 @@ class OpenStreetMapWaterProvider:
         bytes_used = 0
         coordinates_used = 0
         completed_queries = 0
-
-        for query in queries:
-            _check_cancelled(cancelled)
-            try:
-                remaining_bytes = self.max_response_bytes - bytes_used
-                remaining_coordinates = self.max_coordinates - coordinates_used
-                if remaining_bytes < 1024 or remaining_coordinates < 10:
-                    raise WaterError("OpenStreetMap water geometry exceeds the total safety limit")
-                payload = self._load_query(query, remaining_bytes)
-                features, coordinate_count = _parse(
-                    payload,
-                    projection,
-                    bounds,
-                    width_mm,
-                    depth_mm,
-                    minimum_line_width_mm,
-                    remaining_coordinates,
-                    cancelled,
-                )
-            except WaterCancelled:
-                raise
-            except WaterError:
-                continue
-            bytes_used += len(payload)
-            coordinates_used += coordinate_count
-            areas.extend(features.areas)
-            lines.extend(features.lines)
-            completed_queries += 1
+        attempted_queries = 0
+        per_query_byte_limit = max(1024, self.max_response_bytes // len(queries))
+        worker_count = min(self.max_workers, len(queries))
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="osm-water")
+        futures = {
+            executor.submit(self._load_query, query, per_query_byte_limit): query
+            for query in queries
+        }
+        timed_out = False
+        try:
+            for future in as_completed(futures, timeout=self.total_timeout_seconds):
+                attempted_queries += 1
+                if progress is not None:
+                    progress(attempted_queries, len(queries))
+                _check_cancelled(cancelled)
+                try:
+                    payload = future.result()
+                    remaining_coordinates = self.max_coordinates - coordinates_used
+                    if bytes_used + len(payload) > self.max_response_bytes:
+                        raise WaterError(
+                            "OpenStreetMap water geometry exceeds the total safety limit"
+                        )
+                    if remaining_coordinates < 10:
+                        raise WaterError(
+                            "OpenStreetMap water geometry exceeds the total safety limit"
+                        )
+                    features, coordinate_count = _parse(
+                        payload,
+                        projection,
+                        bounds,
+                        width_mm,
+                        depth_mm,
+                        minimum_line_width_mm,
+                        remaining_coordinates,
+                        cancelled,
+                    )
+                except WaterCancelled:
+                    raise
+                except WaterError:
+                    continue
+                bytes_used += len(payload)
+                coordinates_used += coordinate_count
+                areas.extend(features.areas)
+                lines.extend(features.lines)
+                completed_queries += 1
+        except FuturesTimeoutError:
+            timed_out = True
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         if completed_queries == 0:
             raise WaterError("could not download OpenStreetMap water geometry for any map tile")
         return WaterFeatures(
             tuple(dict.fromkeys(areas)),
             tuple(dict.fromkeys(lines)),
-            complete=completed_queries == len(queries),
+            complete=not timed_out and completed_queries == len(queries),
         )
 
     def _load_query(self, query: str, remaining_bytes: int) -> bytes:
@@ -238,7 +279,10 @@ class OpenStreetMapWaterProvider:
 
     def _fetch_from_available_endpoint(self, body: bytes, limit: int) -> bytes:
         last_error: WaterError | None = None
-        for endpoint in self.endpoints:
+        start_index = int.from_bytes(hashlib.sha256(body).digest()[:2], "big") % len(self.endpoints)
+        attempt_count = min(self.max_endpoint_attempts, len(self.endpoints))
+        for offset in range(attempt_count):
+            endpoint = self.endpoints[(start_index + offset) % len(self.endpoints)]
             try:
                 payload = self.fetcher(endpoint, body, limit)
                 if not payload or len(payload) > limit:
@@ -258,8 +302,18 @@ def _query(
     east: float,
     *,
     include_minor_waterways: bool,
+    major_water_only: bool,
 ) -> str:
     bbox = f"{south:.7f},{west:.7f},{north:.7f},{east:.7f}"
+    if major_water_only:
+        natural_water = (
+            f'way["natural"="water"]["water"~"^(lake|reservoir|river|canal)$"]({bbox});'
+            f'relation["natural"="water"]["water"~"^(lake|reservoir|river|canal)$"]({bbox});'
+            f'way["natural"="water"]["name"]({bbox});'
+            f'relation["natural"="water"]["name"]({bbox});'
+        )
+    else:
+        natural_water = f'way["natural"="water"]({bbox});relation["natural"="water"]({bbox});'
     minor = (
         f'way["waterway"="stream"]({bbox});way["waterway"="ditch"]({bbox});'
         f'way["waterway"="drain"]({bbox});'
@@ -267,8 +321,8 @@ def _query(
         else ""
     )
     return (
-        "[out:json][timeout:25];("
-        f'way["natural"="water"]({bbox});relation["natural"="water"]({bbox});'
+        "[out:json][timeout:6];("
+        f"{natural_water}"
         f'way["waterway"="riverbank"]({bbox});'
         f'relation["waterway"="riverbank"]({bbox});'
         f'way["landuse"="reservoir"]({bbox});way["landuse"="basin"]({bbox});'

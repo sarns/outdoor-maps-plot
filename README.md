@@ -144,7 +144,11 @@ Lakes and rivers are loaded as bounded vector geometry from OpenStreetMap via
 public Overpass API instances and cached locally. The renderer tries multiple
 public endpoints; if all are unavailable, it completes without water and reports
 a warning instead of failing the entire 3D export. Large map extents are divided
-into bounded requests; unavailable sections are reported as incomplete water.
+into up to 16 bounded requests, processed by eight parallel workers with short
+per-request timeouts and a 20-second overall deadline. Requests are distributed
+across the public endpoints instead of immediately retrying a busy service.
+Progress is reported for every completed section. Unavailable sections are
+reported as incomplete water.
 Rivers are widened to a configurable
 minimum printable width (`--waterway-width-mm`, default 1.2 mm). This request
 also reveals the approximate route area to the contacted Overpass services. Areas without
