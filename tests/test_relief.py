@@ -5,7 +5,7 @@ import lib3mf
 import pytest
 from pydantic import ValidationError
 
-from outdoor_maps_plot.export_3mf import CORE_NS, write_3mf
+from outdoor_maps_plot.export_3mf import CORE_NS, MATERIAL_NS, write_3mf
 from outdoor_maps_plot.mesh_validation import validate_relief_model
 from outdoor_maps_plot.relief import build_relief_model
 from outdoor_maps_plot.relief_options import ReliefConfig
@@ -86,8 +86,24 @@ def test_writes_four_material_3mf_in_millimetres(tmp_path) -> None:
     metadata = {item.attrib["name"]: item.text for item in root.findall("m:metadata", namespace)}
     elevation_key = next(name for name in metadata if name.endswith(":ElevationData"))
     assert "Mapzen Terrain Tiles" in metadata[elevation_key]
-    assert len(root.findall(".//m:basematerials/m:base", namespace)) == 4
-    assert len(root.findall(".//m:object", namespace)) == 4
+    material_namespace = {"m": MATERIAL_NS}
+    colors = root.findall(".//m:colorgroup/m:color", material_namespace)
+    assert [color.attrib["color"] for color in colors] == [
+        "#4D6B50FF",
+        "#B88A4AFF",
+        "#E8E0CAFF",
+        "#E4431BFF",
+    ]
+    objects = root.findall(".//m:object", namespace)
+    assert [item.attrib["name"] for item in objects] == [
+        "terrain-low",
+        "terrain-mid",
+        "terrain-high",
+        "track",
+    ]
+    assert [item.attrib["pid"] for item in objects] == ["1", "1", "1", "1"]
+    assert [item.attrib["pindex"] for item in objects] == ["0", "1", "2", "3"]
+    assert not root.findall(".//m:basematerials", namespace)
     assert len(root.findall(".//m:build/m:item", namespace)) == 4
 
     wrapper = lib3mf.get_wrapper()

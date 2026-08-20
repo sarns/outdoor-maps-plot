@@ -13,6 +13,7 @@ from outdoor_maps_plot.relief import Mesh, ReliefModel
 from outdoor_maps_plot.relief_options import ReliefConfig
 
 CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+MATERIAL_NS = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
 APP_METADATA_NS = "https://github.com/sarns/outdoor-maps-plot/3mf/metadata/1"
 
 
@@ -44,16 +45,16 @@ def write_3mf(
     document.SetUnit(lib3mf.ModelUnit.MilliMeter)
     _add_metadata(document, model, elevation_attribution)
 
-    materials = document.AddBaseMaterialGroup()
-    material_ids = [materials.AddMaterial(body.name, _color(body.color)) for body in model.bodies]
-    material_resource_id = materials.GetResourceID()
+    colors = document.AddColorGroup()
+    color_ids = [colors.AddColor(_color(body.color)) for body in model.bodies]
+    color_resource_id = colors.GetResourceID()
     identity = wrapper.GetIdentityTransform()
 
-    for body, material_id in zip(model.bodies, material_ids, strict=True):
+    for body, color_id in zip(model.bodies, color_ids, strict=True):
         mesh = document.AddMeshObject()
         mesh.SetName(body.name)
         mesh.SetGeometry(_positions(body), _triangles(body))
-        mesh.SetObjectLevelProperty(material_resource_id, material_id)
+        mesh.SetObjectLevelProperty(color_resource_id, color_id)
         document.AddBuildItem(mesh, identity)
 
     temporary = _temporary_destination(destination)
