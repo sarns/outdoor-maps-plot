@@ -102,9 +102,10 @@ def build_relief_model(
             for row in grid
         ]
 
-    split_height = config.base_thickness_mm + config.relief_height_mm * (
+    requested_split_height = config.base_thickness_mm + config.relief_height_mm * (
         config.terrain_split_percent / 100
     )
+    split_height = _nudge_height_off_surface_vertices(requested_split_height, surface)
     surface_triangles = _surface_triangles(surface, config.width_mm, config.depth_mm)
 
     low = _build_terrain_band(surface_triangles, 0.0, split_height, "terrain-low", config.low_color)
@@ -195,6 +196,28 @@ def _surface_triangles(
     return result
 
 
+def _nudge_height_off_surface_vertices(
+    requested: float, surface: Sequence[Sequence[float]]
+) -> float:
+    """Avoid zero-thickness terrain pinches where a band hits grid vertices exactly."""
+
+    heights = tuple(value for row in surface for value in row)
+    if not any(math.isclose(value, requested, rel_tol=0, abs_tol=1e-9) for value in heights):
+        return requested
+    minimum, maximum = min(heights), max(heights)
+    step = 1e-6
+    for multiplier in range(1, 1001):
+        for direction in (1.0, -1.0):
+            candidate = requested + direction * multiplier * step
+            if not minimum < candidate < maximum:
+                continue
+            if not any(
+                math.isclose(value, candidate, rel_tol=0, abs_tol=1e-9) for value in heights
+            ):
+                return candidate
+    raise ValueError("could not place terrain color split between elevation samples")
+
+
 def _build_terrain_band(
     source_triangles: Sequence[tuple[Vertex, Vertex, Vertex]],
     lower: float,
@@ -248,7 +271,19 @@ def _clip_above(polygon: list[Vertex], height: float) -> list[Vertex]:
             )
         if current_inside:
             output.append(current)
-    return output
+    deduplicated: list[Vertex] = []
+    for vertex in output:
+        if not deduplicated or not _same_vertex(vertex, deduplicated[-1]):
+            deduplicated.append(vertex)
+    if len(deduplicated) > 1 and _same_vertex(deduplicated[0], deduplicated[-1]):
+        deduplicated.pop()
+    return deduplicated
+
+
+def _same_vertex(first: Vertex, second: Vertex) -> bool:
+    return all(
+        math.isclose(a, b, rel_tol=0, abs_tol=1e-9) for a, b in zip(first, second, strict=True)
+    )
 
 
 def _undirected_xy_key(a: Vertex, b: Vertex) -> tuple[Point2D, Point2D]:

@@ -82,6 +82,25 @@ def test_constant_elevation_without_mapped_water_produces_dry_three_part_model()
     assert [body.name for body in model.bodies] == ["terrain-low", "terrain-high", "track"]
 
 
+def test_terrain_split_through_quantized_grid_vertices_remains_manifold() -> None:
+    elevations = [
+        [50, 0, 50, 100, 0],
+        [0, 100, 0, 50, 100],
+        [0, 100, 0, 0, 0],
+        [50, 50, 0, 0, 0],
+        [100, 50, 0, 100, 0],
+    ]
+
+    model = build_relief_model(
+        elevations,
+        [[(10, 10), (90, 70)]],
+        _config(),
+    )
+
+    validate_relief_model(model)
+    assert model.band_heights_mm[0] == pytest.approx(11.4, abs=0.00001)
+
+
 def test_rejects_bad_grid_and_route_outside_printable_area() -> None:
     with pytest.raises(ValueError, match="rectangular"):
         build_relief_model([[1, 2], [3]], [[(10, 10), (90, 70)]], _config())
