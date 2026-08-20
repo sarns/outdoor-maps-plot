@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from outdoor_maps_plot.options import PosterConfig
+from outdoor_maps_plot.relief_options import ReliefConfig
 
 RenderMode = Literal["preview", "final"]
+ProductKind = Literal["poster", "relief"]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled", "expired"]
 
 
@@ -56,7 +58,19 @@ class RenderRequest(BaseModel):
 
     upload_id: str = Field(min_length=16, max_length=128)
     mode: RenderMode = "final"
-    config: PosterConfig = Field(default_factory=PosterConfig)
+    product_kind: ProductKind = "poster"
+    config: PosterConfig | ReliefConfig = Field(default_factory=PosterConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_product_config(cls, value: Any) -> Any:
+        """Select the config model before union parsing can choose by field overlap."""
+        if not isinstance(value, dict):
+            return value
+        product_kind = value.get("product_kind", "poster")
+        raw_config = value.get("config", {})
+        config_type = ReliefConfig if product_kind == "relief" else PosterConfig
+        return {**value, "config": config_type.model_validate(raw_config)}
 
 
 class RenderAccepted(BaseModel):
@@ -84,6 +98,7 @@ class RenderStatusResponse(BaseModel):
     job_id: str
     upload_id: str
     mode: RenderMode
+    product_kind: ProductKind = "poster"
     status: JobStatus
     progress: ProgressResponse
     created_at: datetime

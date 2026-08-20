@@ -16,7 +16,11 @@ RenderPhase = Literal[
     "validating",
     "parsing",
     "fetching_map",
+    "fetching_elevation",
     "drawing",
+    "building_mesh",
+    "validating_mesh",
+    "packaging",
     "rasterizing",
     "finalizing",
 ]

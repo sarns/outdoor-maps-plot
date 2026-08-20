@@ -13,6 +13,8 @@ from pathlib import Path
 
 from outdoor_maps_plot.options import PosterConfig
 from outdoor_maps_plot.poster import PosterError
+from outdoor_maps_plot.relief_options import ReliefConfig
+from outdoor_maps_plot.relief_service import ReliefError
 from outdoor_maps_plot.service import (
     CancellationToken,
     ProgressEvent,
@@ -21,7 +23,7 @@ from outdoor_maps_plot.service import (
 )
 from outdoor_maps_plot.web.config import WebSettings
 from outdoor_maps_plot.web.errors import ApiError
-from outdoor_maps_plot.web.schemas import ErrorBody, JobStatus, RenderMode
+from outdoor_maps_plot.web.schemas import ErrorBody, JobStatus, ProductKind, RenderMode
 from outdoor_maps_plot.web.storage import UploadRecord, WorkspaceStore, _identifier, utc_now
 
 RenderCallable = Callable[..., RenderResult]
@@ -34,7 +36,8 @@ class RenderJob:
     job_id: str
     upload_id: str
     mode: RenderMode
-    config: PosterConfig
+    product_kind: ProductKind
+    config: PosterConfig | ReliefConfig
     status: JobStatus
     progress: ProgressEvent
     created_at: datetime
@@ -53,26 +56,33 @@ class JobManager:
         self,
         settings: WebSettings,
         storage: WorkspaceStore,
-        render_service: RenderCallable,
+        poster_render_service: RenderCallable,
+        relief_render_service: RenderCallable | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
-        self.render_service = render_service
+        self.poster_render_service = poster_render_service
+        self.relief_render_service = relief_render_service
         self._lock = threading.RLock()
         self._capacity = threading.BoundedSemaphore(
             settings.max_concurrent_jobs + settings.max_queued_jobs
         )
         self._executor = ThreadPoolExecutor(
             max_workers=settings.max_concurrent_jobs,
-            thread_name_prefix="poster-render",
+            thread_name_prefix="map-render",
         )
         self._jobs: dict[str, RenderJob] = {}
         self._futures: dict[str, Future[None]] = {}
         self._closed = False
 
     def submit(
-        self, upload: UploadRecord, mode: RenderMode, requested_config: PosterConfig
+        self,
+        upload: UploadRecord,
+        mode: RenderMode,
+        product_kind: ProductKind,
+        requested_config: PosterConfig | ReliefConfig,
     ) -> RenderJob:
+        config = self._effective_config(mode, product_kind, requested_config)
         if self._closed or not self._capacity.acquire(blocking=False):
             raise ApiError(
                 429,
@@ -80,12 +90,12 @@ class JobManager:
                 "The render queue is full. Try again after another job finishes.",
             )
         job_id = _identifier()
-        config = self._effective_config(mode, requested_config)
         now = utc_now()
         job = RenderJob(
             job_id=job_id,
             upload_id=upload.upload_id,
             mode=mode,
+            product_kind=product_kind,
             config=config,
             status="queued",
             progress=ProgressEvent("validating", 0, "Waiting to render", now),
@@ -107,7 +117,18 @@ class JobManager:
             raise
         return job
 
-    def _effective_config(self, mode: RenderMode, config: PosterConfig) -> PosterConfig:
+    def _effective_config(
+        self,
+        mode: RenderMode,
+        product_kind: ProductKind,
+        config: PosterConfig | ReliefConfig,
+    ) -> PosterConfig | ReliefConfig:
+        if product_kind == "relief":
+            if not isinstance(config, ReliefConfig):
+                raise TypeError("relief jobs require ReliefConfig")
+            return config
+        if not isinstance(config, PosterConfig):
+            raise TypeError("poster jobs require PosterConfig")
         max_tiles = min(config.max_tiles, self.settings.max_tiles)
         updates: dict[str, object] = {"max_tiles": max_tiles}
         if mode == "preview":
@@ -129,8 +150,15 @@ class JobManager:
                 job.progress = ProgressEvent("validating", 1, "Starting render", utc_now())
             render_dir = self.storage.render_directory(job.upload_id, job.job_id, job.mode)
             suffix = "jpg" if job.config.output_format == "jpeg" else job.config.output_format
-            destination = render_dir / f"poster-{job.job_id}.{suffix}"
-            result = self.render_service(
+            destination = render_dir / f"{job.product_kind}-{job.job_id}.{suffix}"
+            renderer = (
+                self.relief_render_service
+                if job.product_kind == "relief"
+                else self.poster_render_service
+            )
+            if renderer is None:
+                raise RuntimeError("The 3D relief renderer is not installed.")
+            result = renderer(
                 upload.routes,
                 destination,
                 self.storage.cache,
@@ -151,12 +179,15 @@ class JobManager:
                 job.artifact_media_type = result.media_type
                 job.artifact_size = result.size_bytes
                 job.status = "succeeded"
-                job.progress = ProgressEvent("finalizing", 100, "Poster ready", utc_now())
+                ready_message = (
+                    "3D relief ready" if job.product_kind == "relief" else "Poster ready"
+                )
+                job.progress = ProgressEvent("finalizing", 100, ready_message, utc_now())
         except RenderCancelled:
             with self._lock:
                 job.status = "cancelled"
                 job.progress = ProgressEvent("finalizing", 100, "Render cancelled", utc_now())
-        except PosterError as exc:
+        except (PosterError, ReliefError) as exc:
             LOGGER.warning(
                 "Poster render rejected for job %s: %s",
                 job.job_id,
@@ -165,17 +196,21 @@ class JobManager:
             with self._lock:
                 job.status = "failed"
                 job.error = ErrorBody(
-                    code="poster_error",
+                    code="relief_error" if job.product_kind == "relief" else "poster_error",
                     message=str(exc),
                 )
                 job.progress = ProgressEvent("finalizing", 100, "Render failed", utc_now())
         except Exception as exc:
-            LOGGER.exception("Poster render failed for job %s", job.job_id, exc_info=exc)
+            LOGGER.exception("Map render failed for job %s", job.job_id, exc_info=exc)
             with self._lock:
                 job.status = "failed"
                 job.error = ErrorBody(
                     code="render_failed",
-                    message="The poster could not be rendered.",
+                    message=(
+                        "The 3D relief could not be rendered."
+                        if job.product_kind == "relief"
+                        else "The poster could not be rendered."
+                    ),
                 )
                 job.progress = ProgressEvent("finalizing", 100, "Render failed", utc_now())
         finally:
@@ -188,14 +223,26 @@ class JobManager:
 
     def _progress(self, job: RenderJob, event: ProgressEvent) -> None:
         job.cancellation.raise_if_cancelled()
-        safe_message = {
+        poster_messages = {
             "validating": "Validating poster configuration",
             "parsing": "Preparing routes",
             "fetching_map": "Preparing topographic map",
             "drawing": "Drawing poster",
             "rasterizing": "Preparing image output",
             "finalizing": "Finalizing poster",
-        }.get(event.phase, "Rendering poster")
+        }
+        relief_messages = {
+            "validating": "Validating 3D relief configuration",
+            "parsing": "Preparing routes",
+            "fetching_elevation": "Preparing elevation data",
+            "building_mesh": "Building printable terrain",
+            "validating_mesh": "Checking printable geometry",
+            "packaging": "Packaging 3MF model",
+            "finalizing": "Finalizing 3D relief",
+        }
+        messages = relief_messages if job.product_kind == "relief" else poster_messages
+        fallback = "Rendering 3D relief" if job.product_kind == "relief" else "Rendering poster"
+        safe_message = messages.get(event.phase, fallback)
         with self._lock:
             previous = job.progress.percent
             percent = max(previous, min(100, max(0, event.percent)))
@@ -311,6 +358,7 @@ def event_json(job: RenderJob) -> str:
     return json.dumps(
         {
             "job_id": job.job_id,
+            "product_kind": job.product_kind,
             "status": job.status,
             "progress": {
                 "phase": job.progress.phase,

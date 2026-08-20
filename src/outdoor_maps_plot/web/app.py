@@ -22,6 +22,13 @@ from outdoor_maps_plot.web.jobs import JobManager, RenderCallable
 from outdoor_maps_plot.web.storage import WorkspaceStore
 
 
+def _render_relief(*args, **kwargs):
+    """Import the optional relief pipeline only when a relief job is run."""
+    from outdoor_maps_plot.relief_service import render_relief
+
+    return render_relief(*args, **kwargs)
+
+
 def _static_version(static_root: Path) -> str:
     """Return a stable content fingerprint for browser cache busting."""
     digest = hashlib.sha256()
@@ -34,6 +41,7 @@ def _static_version(static_root: Path) -> str:
 def create_app(
     settings: WebSettings | None = None,
     render_service: RenderCallable = render_poster,
+    relief_render_service: RenderCallable | None = _render_relief,
 ) -> FastAPI:
     resolved_settings = settings or WebSettings.from_env()
     web_root = Path(__file__).resolve().parent
@@ -41,7 +49,12 @@ def create_app(
     static_root = web_root / "static"
     static_version = _static_version(static_root)
     storage = WorkspaceStore(resolved_settings)
-    jobs = JobManager(resolved_settings, storage, render_service)
+    jobs = JobManager(
+        resolved_settings,
+        storage,
+        render_service,
+        relief_render_service,
+    )
 
     async def cleanup_loop() -> None:
         while True:

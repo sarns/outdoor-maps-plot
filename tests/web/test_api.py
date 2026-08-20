@@ -67,6 +67,38 @@ class FakeRenderer:
         return RenderResult(destination, config.output_format, media, destination.stat().st_size)
 
 
+class FakeReliefRenderer:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(
+        self,
+        routes,
+        destination,
+        cache,
+        config,
+        progress=None,
+        cancellation=None,
+    ) -> RenderResult:
+        self.calls.append(
+            {
+                "route_count": len(routes),
+                "destination": destination,
+                "cache": cache,
+                "config": config,
+            }
+        )
+        if cancellation:
+            cancellation.raise_if_cancelled()
+        destination.write_bytes(b"PK\x03\x04fake-3mf")
+        return RenderResult(
+            destination,
+            "3mf",
+            "model/3mf",
+            destination.stat().st_size,
+        )
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> WebSettings:
     return WebSettings(
@@ -142,7 +174,12 @@ def test_config_root_health_and_security_headers(client: TestClient) -> None:
     assert all(len(style["route_palette"]) >= 5 for style in body["styles"])
     assert all(style["route_palette"][0] == style["route"] for style in body["styles"])
     assert body["defaults"]["orientation"] == "landscape"
+    assert body["relief_defaults"]["width_mm"] == 240
+    assert body["relief_defaults"]["depth_mm"] == 240
+    assert body["relief_defaults"]["output_format"] == "3mf"
+    assert body["relief_schema"]["properties"]["width_mm"]["maximum"] == 256
     assert {"pdf", "png", "jpeg"} == set(body["output_formats"])
+    assert body["relief_output_formats"] == ["3mf"]
     assert all("key" not in provider for provider in body["providers"])
     assert client.get("/healthz").json() == {"status": "ok"}
     assert client.get("/readyz").json() == {"status": "ready"}
@@ -338,6 +375,81 @@ def test_custom_paper_size_reaches_renderer(client: TestClient, renderer: FakeRe
 
     assert result["status"] == "succeeded"
     assert renderer.calls[-1]["config"].paper_size == "300X400MM"
+
+
+def test_relief_render_uses_separate_config_and_renderer(settings: WebSettings) -> None:
+    poster_renderer = FakeRenderer()
+    relief_renderer = FakeReliefRenderer()
+    app = create_app(settings, poster_renderer, relief_renderer)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        uploaded = upload(client)
+        accepted = client.post(
+            "/api/renders",
+            json={
+                "upload_id": uploaded["upload_id"],
+                "product_kind": "relief",
+                "mode": "final",
+                "config": {
+                    "width_mm": 180,
+                    "depth_mm": 120,
+                    "low_color": "#112233",
+                    "mid_color": "#445566",
+                    "high_color": "#778899",
+                    "track_color": "#AABBCC",
+                },
+            },
+        )
+        assert accepted.status_code == 202, accepted.text
+        result = wait_for_terminal(client, accepted.json()["job_id"])
+        download = client.get(result["artifact"]["download_url"])
+
+    assert result["status"] == "succeeded"
+    assert result["product_kind"] == "relief"
+    assert result["artifact"]["media_type"] == "model/3mf"
+    assert result["artifact"]["filename"].endswith(".3mf")
+    assert download.content.startswith(b"PK\x03\x04")
+    assert not poster_renderer.calls
+    config = relief_renderer.calls[-1]["config"]
+    assert config.width_mm == 180
+    assert config.depth_mm == 120
+    assert config.output_format == "3mf"
+
+
+def test_relief_preview_is_explicitly_unavailable(settings: WebSettings) -> None:
+    app = create_app(settings, FakeRenderer(), FakeReliefRenderer())
+    with TestClient(app, raise_server_exceptions=False) as client:
+        uploaded = upload(client)
+        response = client.post(
+            "/api/renders",
+            json={
+                "upload_id": uploaded["upload_id"],
+                "product_kind": "relief",
+                "mode": "preview",
+                "config": {},
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "relief_preview_unavailable"
+
+
+@pytest.mark.parametrize(("field", "value"), [("width_mm", 256.1), ("depth_mm", 300)])
+def test_relief_rejects_dimensions_over_build_area(
+    settings: WebSettings, field: str, value: float
+) -> None:
+    app = create_app(settings, FakeRenderer(), FakeReliefRenderer())
+    with TestClient(app, raise_server_exceptions=False) as client:
+        uploaded = upload(client)
+        response = client.post(
+            "/api/renders",
+            json={
+                "upload_id": uploaded["upload_id"],
+                "product_kind": "relief",
+                "config": {field: value},
+            },
+        )
+
+    assert response.status_code == 422
 
 
 def test_expected_poster_errors_are_actionable(

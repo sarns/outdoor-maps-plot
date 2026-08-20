@@ -1,9 +1,9 @@
 # outdoor-maps-plot
 
-Create print-ready topographic posters from GPX and FIT tracks through a browser
-or the command line. Posters contain a real tiled basemap, an emphasized route,
-stage distance/ascent statistics, endpoints, coordinates, and provider
-attribution.
+Create print-ready topographic posters and four-color 3D relief maps from GPX
+and FIT tracks through a browser or the command line. Posters contain a real
+tiled basemap, an emphasized route, stage distance/ascent statistics, endpoints,
+coordinates, and provider attribution.
 
 ## Sample posters
 
@@ -30,6 +30,11 @@ Open <http://localhost:8000>, upload up to 15 GPX or FIT files, configure the
 poster, generate a preview, and download PDF, PNG, or JPEG output. Uploaded files
 and generated artifacts expire automatically. Map tiles are retained in the
 `poster-cache` Docker volume.
+
+Select **3D relief** to generate a multi-part 3MF model with exactly four
+printable colors: low, middle, and high terrain plus a raised track. Relief
+models default to a 240 × 240 mm footprint and enforce a 256 mm maximum in both
+build dimensions. A browser preview is not yet available for relief models.
 
 The service binds to localhost by default. Configure authentication and a TLS
 reverse proxy before deliberately exposing it to a network.
@@ -99,6 +104,38 @@ a north-to-south itinerary using their nearest endpoints. Use
 
 Run `uv run outdoor-maps-plot --help` for every option,
 `--list-styles` for the presets, or `--list-paper-sizes` for named sizes.
+
+## 3D relief quick start
+
+Generate a 3MF model for a four-material slicer with:
+
+```shell
+uv run outdoor-maps-relief data \
+  --width-mm 200 \
+  --depth-mm 160 \
+  --relief-height-mm 18 \
+  --output output/alps-relief.3mf
+```
+
+Width and depth can be configured independently up to 256 mm; the route extent
+is fitted without geographic stretching. The default 240 mm size leaves useful
+bed-edge clearance. A full 256 mm dimension is accepted with a warning because
+it leaves no room for a brim or printer tolerance. The 3MF contains separate
+parts for these four colors by default:
+
+```text
+--terrain-low-color  #4D6B50
+--terrain-mid-color  #B88A4A
+--terrain-high-color #E8E0CA
+--track-color        #E4431B
+```
+
+Assign the four parts to matching filaments in the slicer. The application does
+not generate printer-specific G-code. Relief elevation is sampled from the
+public Mapzen Terrain Tiles dataset on AWS and cached locally. Review the
+[Terrain Tiles source attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)
+for the region represented by a generated model. Fetching these tiles reveals
+the approximate route area to the elevation hosting service.
 
 ### Raster output
 

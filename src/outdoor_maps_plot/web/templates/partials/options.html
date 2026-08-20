@@ -2,8 +2,8 @@
   <div class="section-heading">
     <div class="step-number" aria-hidden="true">2</div>
     <div>
-      <p class="eyebrow">SET THE TONE</p>
-      <h2 id="options-heading">Poster options</h2>
+      <p class="eyebrow">CHOOSE THE OUTPUT</p>
+      <h2 id="options-heading">Map options</h2>
     </div>
   </div>
 
@@ -12,6 +12,22 @@
       <strong>Review the highlighted settings.</strong>
       <ul></ul>
     </div>
+
+    <fieldset class="form-section product-picker">
+      <legend>Product</legend>
+      <div class="segmented">
+        <label>
+          <input type="radio" name="product_kind" value="poster" checked>
+          <span>Printed poster</span>
+        </label>
+        <label>
+          <input type="radio" name="product_kind" value="relief">
+          <span>3D relief</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <div id="poster-options">
 
     <fieldset class="form-section">
       <legend>Words</legend>
@@ -189,9 +205,98 @@
         </div>
       </div>
     </details>
+    </div>
+
+    <div id="relief-options" hidden>
+      <fieldset class="form-section">
+        <legend>Build area</legend>
+        <div class="field-row">
+          <div class="field">
+            <label for="relief-width-mm">Width <span>mm</span></label>
+            <input id="relief-width-mm" name="width_mm" type="number" min="1" max="256" step="0.1" value="240">
+          </div>
+          <div class="field">
+            <label for="relief-depth-mm">Depth <span>mm</span></label>
+            <input id="relief-depth-mm" name="depth_mm" type="number" min="1" max="256" step="0.1" value="240">
+          </div>
+        </div>
+        <small class="help-text">The model preserves the geographic aspect ratio inside this footprint. The printer limit is 256 × 256 mm.</small>
+        <small class="help-text">Generating a relief requests elevation tiles for the approximate route area from the configured provider.</small>
+      </fieldset>
+
+      <fieldset class="form-section">
+        <legend>Printable geometry</legend>
+        <div class="field-row">
+          <div class="field">
+            <label for="base-thickness-mm">Base thickness <span>mm</span></label>
+            <input id="base-thickness-mm" name="base_thickness_mm" type="number" min="0.1" step="0.1" value="2.4">
+          </div>
+          <div class="field">
+            <label for="relief-height-mm">Relief height <span>mm</span></label>
+            <input id="relief-height-mm" name="relief_height_mm" type="number" min="0.1" step="0.1" value="18">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="track-width-mm">Track width <span>mm</span></label>
+            <input id="track-width-mm" name="track_width_mm" type="number" min="0.1" step="0.1" value="1.6">
+          </div>
+          <div class="field">
+            <label for="track-height-mm">Track height <span>mm</span></label>
+            <input id="track-height-mm" name="track_height_mm" type="number" min="0.1" step="0.1" value="0.8">
+          </div>
+        </div>
+        <div class="field">
+          <div class="range-heading">
+            <label for="relief-padding-percent">Route padding</label>
+            <output id="relief-padding-output" for="relief-padding-percent">6%</output>
+          </div>
+          <input id="relief-padding-percent" name="relief_padding_percent" type="range" min="0" max="50" step="0.5" value="6">
+        </div>
+      </fieldset>
+
+      <fieldset class="form-section relief-colors">
+        <legend>Four print colors</legend>
+        <p class="help-text">Three elevation bands plus one raised track. The 3MF keeps them as separate printable parts.</p>
+        <div class="field-row">
+          <div class="field">
+            <label for="terrain-low-color">Low terrain</label>
+            <input id="terrain-low-color" name="low_color" type="color" value="#4d6b50">
+          </div>
+          <div class="field">
+            <label for="terrain-mid-color">Middle terrain</label>
+            <input id="terrain-mid-color" name="mid_color" type="color" value="#b88a4a">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="terrain-high-color">High terrain</label>
+            <input id="terrain-high-color" name="high_color" type="color" value="#e8e0ca">
+          </div>
+          <div class="field">
+            <label for="relief-track-color">Track</label>
+            <input id="relief-track-color" name="track_color" type="color" value="#e4431b">
+          </div>
+        </div>
+      </fieldset>
+
+      <details class="advanced-panel">
+        <summary>
+          <span>Advanced settings</span>
+          <span class="advanced-hint">Mesh detail</span>
+        </summary>
+        <div class="advanced-content">
+          <div class="field">
+            <label for="mesh-pitch-mm">Mesh pitch <span>mm</span></label>
+            <input id="mesh-pitch-mm" name="mesh_pitch_mm" type="number" min="0.1" step="0.1" value="0.8">
+            <small class="help-text">Smaller values create more triangles and take longer to render.</small>
+          </div>
+        </div>
+      </details>
+    </div>
 
     <button id="reset-options" class="text-button reset-button" type="button">
-      Reset poster settings
+      Reset map settings
     </button>
   </form>
 </section>
