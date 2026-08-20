@@ -370,7 +370,18 @@ def _water_mask(
                 _distance_to_line(point, line.points_mm) <= line.width_mm / 2 + line_margin
                 for line in features.lines
             )
-            output_row.append(in_area or near_line)
+            in_raster = False
+            if features.raster_mask and features.raster_mask[0]:
+                source_row = min(
+                    len(features.raster_mask) - 1,
+                    math.floor((row + 0.5) / (rows - 1) * len(features.raster_mask)),
+                )
+                source_column = min(
+                    len(features.raster_mask[0]) - 1,
+                    math.floor((column + 0.5) / (columns - 1) * len(features.raster_mask[0])),
+                )
+                in_raster = features.raster_mask[source_row][source_column]
+            output_row.append(in_area or near_line or in_raster)
         mask.append(output_row)
     return _repair_diagonal_contacts(mask)
 

@@ -1,10 +1,18 @@
+import io
 import json
 import threading
 
 import pytest
+from PIL import Image, ImageDraw
 
 from outdoor_maps_plot.projection import LocalMetricProjection, MetricBounds
-from outdoor_maps_plot.water import OpenStreetMapWaterProvider, WaterCancelled, WaterError
+from outdoor_maps_plot.water import (
+    OSM_WATER_COLOR,
+    OpenStreetMapLakeTileProvider,
+    OpenStreetMapWaterProvider,
+    WaterCancelled,
+    WaterError,
+)
 
 
 def _document() -> bytes:
@@ -35,6 +43,60 @@ def _document() -> bytes:
             ]
         }
     ).encode()
+
+
+def _map_tile(*, large_lake: bool = True, thin_river: bool = False) -> bytes:
+    image = Image.new("RGB", (256, 256), "#f2efe9")
+    draw = ImageDraw.Draw(image)
+    if large_lake:
+        draw.rectangle((0, 0, 255, 255), fill=OSM_WATER_COLOR)
+    if thin_river:
+        draw.line((0, 128, 255, 128), fill=OSM_WATER_COLOR, width=1)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def test_lake_tile_provider_returns_a_normalized_large_lake_mask() -> None:
+    urls: list[str] = []
+
+    def fetch(url: str, _limit: int) -> bytes:
+        urls.append(url)
+        return _map_tile()
+
+    features = OpenStreetMapLakeTileProvider(
+        max_zoom=8,
+        mask_size=64,
+        fetcher=fetch,
+    ).load(
+        LocalMetricProjection(47.0, 10.0),
+        MetricBounds(-500, -500, 500, 500),
+        width_mm=100,
+        depth_mm=100,
+        minimum_area_mm2=9,
+    )
+
+    assert urls
+    assert not features.empty
+    assert len(features.raster_mask) == 64
+    assert len(features.raster_mask[0]) == 64
+    assert sum(map(sum, features.raster_mask)) > 3_000
+
+
+def test_lake_tile_provider_removes_a_thin_waterway() -> None:
+    features = OpenStreetMapLakeTileProvider(
+        max_zoom=8,
+        mask_size=64,
+        fetcher=lambda *_args: _map_tile(large_lake=False, thin_river=True),
+    ).load(
+        LocalMetricProjection(47.0, 10.0),
+        MetricBounds(-500, -500, 500, 500),
+        width_mm=100,
+        depth_mm=100,
+        minimum_area_mm2=1,
+    )
+
+    assert features.empty
 
 
 def test_osm_water_provider_maps_only_large_lakes_to_model_space() -> None:

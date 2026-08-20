@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
@@ -17,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from PIL import Image, UnidentifiedImageError
+
 from outdoor_maps_plot.projection import LocalMetricProjection, MetricBounds
 
 Point2D = tuple[float, float]
@@ -28,6 +31,9 @@ OVERPASS_ENDPOINTS = (
     "https://overpass.private.coffee/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 )
+OSM_TILE_URL = "https://tile.openstreetmap.org/{zoom}/{x}/{y}.png"
+OSM_WATER_COLOR = (170, 211, 223)
+WEB_MERCATOR_MAX_LATITUDE = 85.05112878
 
 
 class WaterError(ValueError):
@@ -55,10 +61,13 @@ class WaterFeatures:
     areas: tuple[WaterArea, ...] = ()
     lines: tuple[WaterLine, ...] = ()
     complete: bool = True
+    # Rows run south to north, matching the relief grid. This normalized mask
+    # lets a bounded raster source supply water without fabricating polygons.
+    raster_mask: tuple[tuple[bool, ...], ...] = ()
 
     @property
     def empty(self) -> bool:
-        return not self.areas and not self.lines
+        return not self.areas and not self.lines and not any(map(any, self.raster_mask))
 
 
 class WaterProvider(Protocol):
@@ -82,6 +91,200 @@ class WaterProvider(Protocol):
 
 
 WaterFetcher = Callable[[str, bytes, int], bytes]
+TileFetcher = Callable[[str, int], bytes]
+
+
+class OpenStreetMapLakeTileProvider:
+    """Detect printable large water areas from a small OSM raster-tile set.
+
+    This is intentionally a large-area detector, not a general map-image
+    scraper: the zoom is reduced until the request fits a strict tile cap,
+    tiles are cached indefinitely, thin waterways are removed, and only
+    connected components above the requested printed area are returned.
+    """
+
+    def __init__(
+        self,
+        *,
+        cache_dir: Path | None = None,
+        tile_url: str = OSM_TILE_URL,
+        timeout_seconds: float = 8.0,
+        total_timeout_seconds: float = 15.0,
+        max_tiles: int = 16,
+        max_zoom: int = 12,
+        mask_size: int = 256,
+        max_tile_bytes: int = 2 * 1024 * 1024,
+        fetcher: TileFetcher | None = None,
+    ) -> None:
+        if (
+            not tile_url.startswith("https://")
+            or timeout_seconds <= 0
+            or total_timeout_seconds <= 0
+            or not 1 <= max_tiles <= 32
+            or not 0 <= max_zoom <= 19
+            or not 32 <= mask_size <= 512
+            or max_tile_bytes < 1024
+        ):
+            raise WaterError("lake tile provider resource limits are invalid")
+        self.cache_dir = cache_dir
+        self.tile_url = tile_url
+        self.timeout_seconds = timeout_seconds
+        self.total_timeout_seconds = total_timeout_seconds
+        self.max_tiles = max_tiles
+        self.max_zoom = max_zoom
+        self.mask_size = mask_size
+        self.max_tile_bytes = max_tile_bytes
+        self.fetcher = fetcher or self._download_tile
+
+    @property
+    def cache_identity(self) -> str:
+        digest = hashlib.sha256(self.tile_url.encode("utf-8")).hexdigest()[:12]
+        return f"osm-lake-tiles:{digest}:z{self.max_zoom}"
+
+    @property
+    def attribution(self) -> str:
+        return "Water detection © OpenStreetMap contributors, ODbL 1.0"
+
+    def _download_tile(self, url: str, limit: int) -> bytes:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "outdoor-maps-plot/0.2 (personal relief map)"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                declared = response.headers.get("Content-Length")
+                if declared is not None and int(declared) > limit:
+                    raise WaterError("OpenStreetMap lake tile exceeds the byte limit")
+                payload = response.read(limit + 1)
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            raise WaterError("could not download an OpenStreetMap lake tile") from exc
+        if not payload or len(payload) > limit:
+            raise WaterError("OpenStreetMap lake tile is empty or too large")
+        return payload
+
+    def load(
+        self,
+        projection: LocalMetricProjection,
+        bounds: MetricBounds,
+        *,
+        width_mm: float,
+        depth_mm: float,
+        minimum_area_mm2: float,
+        cancelled: CancelCheck | None = None,
+        progress: WaterProgress | None = None,
+    ) -> WaterFeatures:
+        _check_cancelled(cancelled)
+        if not math.isfinite(minimum_area_mm2) or minimum_area_mm2 <= 0:
+            raise WaterError("minimum printed lake area must be positive")
+        south, west, north, east = _geo_bounds(projection, bounds)
+        if west > east:
+            raise WaterError("lake tile detection does not support date-line crossing extents")
+        zoom, coordinates = _select_raster_tiles(
+            south,
+            west,
+            north,
+            east,
+            max_zoom=self.max_zoom,
+            max_tiles=self.max_tiles,
+        )
+        images: dict[tuple[int, int], Image.Image] = {}
+        failures = 0
+        executor = ThreadPoolExecutor(
+            max_workers=min(4, len(coordinates)), thread_name_prefix="lake"
+        )
+        futures = {
+            executor.submit(self._load_tile_image, zoom, x, y): (x, y) for x, y in coordinates
+        }
+        completed = 0
+        try:
+            for future in as_completed(futures, timeout=self.total_timeout_seconds):
+                _check_cancelled(cancelled)
+                coordinate = futures[future]
+                completed += 1
+                try:
+                    images[coordinate] = future.result()
+                except WaterError:
+                    failures += 1
+                if progress is not None:
+                    progress(completed, len(coordinates))
+        except FuturesTimeoutError:
+            failures += len(coordinates) - completed
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+        if not images:
+            raise WaterError("could not download any OpenStreetMap lake tile")
+
+        raw_mask = self._sample_water_mask(projection, bounds, zoom, images, cancelled)
+        opened = _open_thin_waterways(raw_mask)
+        filtered = _filter_small_components(
+            opened,
+            minimum_cells=max(
+                1,
+                math.ceil(
+                    minimum_area_mm2 / ((width_mm / self.mask_size) * (depth_mm / self.mask_size))
+                ),
+            ),
+        )
+        return WaterFeatures(
+            complete=failures == 0,
+            raster_mask=tuple(tuple(row) for row in filtered),
+        )
+
+    def _load_tile_image(self, zoom: int, x: int, y: int) -> Image.Image:
+        cache_path = (
+            self.cache_dir / "raster" / str(zoom) / str(x) / f"{y}.png" if self.cache_dir else None
+        )
+        if cache_path is not None and cache_path.is_file():
+            if cache_path.stat().st_size > self.max_tile_bytes:
+                raise WaterError("cached OpenStreetMap lake tile exceeds the byte limit")
+            payload = cache_path.read_bytes()
+        else:
+            url = self.tile_url.format(zoom=zoom, x=x, y=y)
+            payload = self.fetcher(url, self.max_tile_bytes)
+            if not payload or len(payload) > self.max_tile_bytes:
+                raise WaterError("OpenStreetMap lake tile is empty or too large")
+            if cache_path is not None:
+                _atomic_cache_write(cache_path, payload)
+        try:
+            with Image.open(io.BytesIO(payload)) as source:
+                if source.size != (256, 256):
+                    raise WaterError("OpenStreetMap lake tile has an unexpected size")
+                return source.convert("RGB")
+        except (OSError, UnidentifiedImageError) as exc:
+            raise WaterError("OpenStreetMap lake tile is not a valid PNG image") from exc
+
+    def _sample_water_mask(
+        self,
+        projection: LocalMetricProjection,
+        bounds: MetricBounds,
+        zoom: int,
+        images: dict[tuple[int, int], Image.Image],
+        cancelled: CancelCheck | None,
+    ) -> list[list[bool]]:
+        result: list[list[bool]] = []
+        for row in range(self.mask_size):
+            _check_cancelled(cancelled)
+            metric_y = bounds.min_y + (row + 0.5) / self.mask_size * bounds.height
+            output_row: list[bool] = []
+            for column in range(self.mask_size):
+                metric_x = bounds.min_x + (column + 0.5) / self.mask_size * bounds.width
+                latitude, longitude = projection.unproject((metric_x, metric_y))
+                tile_x, tile_y = _web_tile_point(latitude, longitude, zoom)
+                x, y = math.floor(tile_x), math.floor(tile_y)
+                image = images.get((x, y))
+                if image is None:
+                    output_row.append(False)
+                    continue
+                pixel_x = min(255, max(0, int((tile_x - x) * 256)))
+                pixel_y = min(255, max(0, int((tile_y - y) * 256)))
+                red, green, blue = image.getpixel((pixel_x, pixel_y))
+                output_row.append(
+                    abs(red - OSM_WATER_COLOR[0]) <= 12
+                    and abs(green - OSM_WATER_COLOR[1]) <= 12
+                    and abs(blue - OSM_WATER_COLOR[2]) <= 12
+                )
+            result.append(output_row)
+        return result
 
 
 class OpenStreetMapWaterProvider:
@@ -286,6 +489,102 @@ class OpenStreetMapWaterProvider:
         raise WaterError(
             "could not download OpenStreetMap water geometry from any public endpoint"
         ) from last_error
+
+
+def _web_tile_point(latitude: float, longitude: float, zoom: int) -> Point2D:
+    latitude = min(WEB_MERCATOR_MAX_LATITUDE, max(-WEB_MERCATOR_MAX_LATITUDE, latitude))
+    scale = 2**zoom
+    x = (longitude + 180.0) / 360.0 * scale
+    latitude_radians = math.radians(latitude)
+    y = (1.0 - math.asinh(math.tan(latitude_radians)) / math.pi) / 2.0 * scale
+    return x, y
+
+
+def _select_raster_tiles(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    *,
+    max_zoom: int,
+    max_tiles: int,
+) -> tuple[int, tuple[tuple[int, int], ...]]:
+    for zoom in range(max_zoom, -1, -1):
+        north_west = _web_tile_point(north, west, zoom)
+        south_east = _web_tile_point(south, east, zoom)
+        scale = 2**zoom
+        x0 = min(scale - 1, max(0, math.floor(north_west[0])))
+        x1 = min(scale - 1, max(0, math.floor(south_east[0] - 1e-12)))
+        y0 = min(scale - 1, max(0, math.floor(north_west[1])))
+        y1 = min(scale - 1, max(0, math.floor(south_east[1] - 1e-12)))
+        coordinates = tuple(
+            (x, y)
+            for y in range(min(y0, y1), max(y0, y1) + 1)
+            for x in range(min(x0, x1), max(x0, x1) + 1)
+        )
+        if len(coordinates) <= max_tiles:
+            return zoom, coordinates
+    raise WaterError("relief extent cannot be represented within the lake tile limit")
+
+
+def _open_thin_waterways(mask: list[list[bool]]) -> list[list[bool]]:
+    if len(mask) < 3 or len(mask[0]) < 3:
+        return mask
+    rows, columns = len(mask), len(mask[0])
+    eroded = [[False] * columns for _ in range(rows)]
+    for row in range(1, rows - 1):
+        for column in range(1, columns - 1):
+            eroded[row][column] = all(
+                mask[row + dy][column + dx] for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
+            )
+    opened = [[False] * columns for _ in range(rows)]
+    for row in range(rows):
+        for column in range(columns):
+            opened[row][column] = any(
+                0 <= row + dy < rows
+                and 0 <= column + dx < columns
+                and eroded[row + dy][column + dx]
+                for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
+            )
+    return opened
+
+
+def _filter_small_components(mask: list[list[bool]], *, minimum_cells: int) -> list[list[bool]]:
+    if not mask or not mask[0]:
+        return mask
+    rows, columns = len(mask), len(mask[0])
+    output = [[False] * columns for _ in range(rows)]
+    visited: set[tuple[int, int]] = set()
+    for start_row in range(rows):
+        for start_column in range(columns):
+            start = (start_row, start_column)
+            if not mask[start_row][start_column] or start in visited:
+                continue
+            visited.add(start)
+            component = [start]
+            pending = [start]
+            while pending:
+                row, column = pending.pop()
+                for next_row, next_column in (
+                    (row - 1, column),
+                    (row + 1, column),
+                    (row, column - 1),
+                    (row, column + 1),
+                ):
+                    point = (next_row, next_column)
+                    if (
+                        0 <= next_row < rows
+                        and 0 <= next_column < columns
+                        and mask[next_row][next_column]
+                        and point not in visited
+                    ):
+                        visited.add(point)
+                        component.append(point)
+                        pending.append(point)
+            if len(component) >= minimum_cells:
+                for row, column in component:
+                    output[row][column] = True
+    return output
 
 
 def _query(

@@ -31,7 +31,7 @@ from outdoor_maps_plot.service import (
     RenderResult,
 )
 from outdoor_maps_plot.water import (
-    OpenStreetMapWaterProvider,
+    OpenStreetMapLakeTileProvider,
     WaterCancelled,
     WaterError,
     WaterFeatures,
@@ -128,7 +128,7 @@ def render_relief(
         token.raise_if_cancelled()
         _report(progress, "fetching_elevation", 50, "Elevation data ready")
 
-        mapped_water_provider = water_provider or OpenStreetMapWaterProvider(
+        mapped_water_provider = water_provider or OpenStreetMapLakeTileProvider(
             cache_dir=cache / "water"
         )
         _report(progress, "fetching_water", 52, "Loading large lakes")

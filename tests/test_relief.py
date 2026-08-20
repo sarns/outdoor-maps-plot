@@ -82,6 +82,22 @@ def test_constant_elevation_without_mapped_water_produces_dry_three_part_model()
     assert [body.name for body in model.bodies] == ["terrain-low", "terrain-high", "track"]
 
 
+def test_normalized_raster_water_mask_builds_blue_water_body() -> None:
+    raster = tuple(
+        tuple(1 <= row <= 6 and 1 <= column <= 6 for column in range(8)) for row in range(8)
+    )
+    model = build_relief_model(
+        [[row + column for column in range(5)] for row in range(5)],
+        [[(10, 10), (90, 70)]],
+        _config(),
+        WaterFeatures(raster_mask=raster),
+    )
+
+    validate_relief_model(model)
+    water = next(body for body in model.bodies if body.name == "water")
+    assert water.color == "#2F75B5"
+
+
 def test_terrain_split_through_quantized_grid_vertices_remains_manifold() -> None:
     elevations = [
         [50, 0, 50, 100, 0],
