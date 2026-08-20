@@ -26,16 +26,19 @@ class ReliefConfig(BaseModel):
     relief_height_mm: float = Field(default=18.0, gt=0, le=200)
     track_width_mm: float = Field(default=1.6, gt=0, le=25)
     track_height_mm: float = Field(default=0.8, gt=0, le=25)
+    water_height_mm: float = Field(default=0.4, gt=0, le=5)
+    waterway_width_mm: float = Field(default=1.2, gt=0, le=25)
     mesh_pitch_mm: float = Field(default=0.8, gt=0, le=10)
     padding_percent: float = Field(default=6.0, ge=0, le=50)
+    terrain_split_percent: float = Field(default=50.0, gt=0, lt=100)
 
     low_color: str = "#4D6B50"
-    mid_color: str = "#B88A4A"
-    high_color: str = "#E8E0CA"
+    high_color: str = "#8B5A2B"
+    water_color: str = "#2F75B5"
     track_color: str = "#E4431B"
     output_format: Literal["3mf"] = "3mf"
 
-    @field_validator("low_color", "mid_color", "high_color", "track_color")
+    @field_validator("low_color", "high_color", "water_color", "track_color")
     @classmethod
     def validate_color(cls, value: str) -> str:
         if not HEX_COLOR_PATTERN.fullmatch(value):
@@ -45,11 +48,11 @@ class ReliefConfig(BaseModel):
     @model_validator(mode="after")
     def validate_distinct_colors(self) -> ReliefConfig:
         if len(set(self.colors)) != 4:
-            raise ValueError("low, mid, high, and track colors must be distinct")
+            raise ValueError("low terrain, high terrain, water, and track colors must be distinct")
         return self
 
     @property
     def colors(self) -> tuple[str, str, str, str]:
-        """Return the four materials in terrain-low to track order."""
+        """Return the four materials in terrain-low, terrain-high, water, track order."""
 
-        return self.low_color, self.mid_color, self.high_color, self.track_color
+        return self.low_color, self.high_color, self.water_color, self.track_color

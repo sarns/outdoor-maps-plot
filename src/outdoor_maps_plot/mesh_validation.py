@@ -49,12 +49,16 @@ def validate_mesh(mesh: Mesh) -> None:
 
 
 def validate_relief_model(model: ReliefModel) -> None:
-    expected_names = ("terrain-low", "terrain-mid", "terrain-high", "track")
-    if tuple(body.name for body in model.bodies) != expected_names:
-        raise MeshValidationError("relief must contain exactly the four required named bodies")
+    names = tuple(body.name for body in model.bodies)
+    expected_names = ("terrain-low", "terrain-high", "water", "track")
+    dry_names = ("terrain-low", "terrain-high", "track")
+    if names not in {expected_names, dry_names}:
+        raise MeshValidationError(
+            "relief bodies must be low terrain, high terrain, optional water, track"
+        )
     colors = tuple(body.color for body in model.bodies)
-    if len(set(colors)) != 4:
-        raise MeshValidationError("relief must contain exactly four distinct materials")
+    if len(set(colors)) != len(colors) or len(colors) not in {3, 4}:
+        raise MeshValidationError("relief must contain three or four distinct materials")
     for body in model.bodies:
         validate_mesh(body)
         xs = [vertex[0] for vertex in body.vertices]

@@ -100,10 +100,13 @@ def test_ui_exposes_separate_four_color_relief_product() -> None:
         "relief_height_mm",
         "track_width_mm",
         "track_height_mm",
+        "water_height_mm",
+        "waterway_width_mm",
+        "terrain_split_percent",
         "mesh_pitch_mm",
         "low_color",
-        "mid_color",
         "high_color",
+        "water_color",
         "track_color",
     }:
         assert f'name="{name}"' in html

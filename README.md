@@ -31,8 +31,9 @@ poster, generate a preview, and download PDF, PNG, or JPEG output. Uploaded file
 and generated artifacts expire automatically. Map tiles are retained in the
 `poster-cache` Docker volume.
 
-Select **3D relief** to generate a multi-part 3MF model with exactly four
-printable colors: low, middle, and high terrain plus a raised track. Relief
+Select **3D relief** to generate a multi-part 3MF model with up to four
+printable colors: green low terrain, brown high terrain, mapped blue water,
+and a raised orange track. Relief
 models default to a 240 × 240 mm footprint and enforce a 256 mm maximum in both
 build dimensions. A browser preview is not yet available for relief models.
 
@@ -125,8 +126,8 @@ parts for these four colors by default:
 
 ```text
 --terrain-low-color  #4D6B50
---terrain-mid-color  #B88A4A
---terrain-high-color #E8E0CA
+--terrain-high-color #8B5A2B
+--water-color        #2F75B5
 --track-color        #E4431B
 ```
 
@@ -138,6 +139,12 @@ for the region represented by a generated model. Fetching these tiles reveals
 the approximate route area to the elevation hosting service. For long routes,
 the renderer automatically selects the highest elevation zoom that stays within
 its tile-download safety limit.
+
+Lakes and rivers are loaded as bounded vector geometry from OpenStreetMap via
+the public Overpass API and cached locally. Rivers are widened to a configurable
+minimum printable width (`--waterway-width-mm`, default 1.2 mm). This request
+also reveals the approximate route area to the Overpass service. Areas without
+mapped water produce a valid three-part model without an unused blue body.
 
 ### Raster output
 

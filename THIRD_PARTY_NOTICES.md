@@ -52,3 +52,12 @@ applicable source credit for the region represented by a generated model.
 
 - Dataset: <https://registry.opendata.aws/terrain-tiles/>
 - Source attribution: <https://github.com/tilezen/joerd/blob/master/docs/attribution.md>
+
+## Water geometry
+
+Relief lakes and rivers use OpenStreetMap data requested through the public
+Overpass API. OpenStreetMap data is available under the Open Data Commons Open
+Database License (ODbL); generated 3MF metadata retains contributor attribution.
+
+- <https://www.openstreetmap.org/copyright>
+- <https://wiki.openstreetmap.org/wiki/Overpass_API>

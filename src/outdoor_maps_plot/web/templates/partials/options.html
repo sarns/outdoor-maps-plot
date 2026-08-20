@@ -221,7 +221,7 @@
           </div>
         </div>
         <small class="help-text">The model preserves the geographic aspect ratio inside this footprint. The printer limit is 256 × 256 mm.</small>
-        <small class="help-text">Generating a relief requests elevation tiles for the approximate route area from the configured provider.</small>
+        <small class="help-text">Generating a relief sends the approximate route area to the elevation provider and OpenStreetMap Overpass for lakes and rivers.</small>
       </fieldset>
 
       <fieldset class="form-section">
@@ -246,6 +246,20 @@
             <input id="track-height-mm" name="track_height_mm" type="number" min="0.1" step="0.1" value="0.8">
           </div>
         </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="water-height-mm">Water height <span>mm</span></label>
+            <input id="water-height-mm" name="water_height_mm" type="number" min="0.1" step="0.1" value="0.4">
+          </div>
+          <div class="field">
+            <label for="waterway-width-mm">Minimum river width <span>mm</span></label>
+            <input id="waterway-width-mm" name="waterway_width_mm" type="number" min="0.1" step="0.1" value="1.2">
+          </div>
+        </div>
+        <div class="field">
+          <label for="terrain-split-percent">Terrain color split <span>% height</span></label>
+          <input id="terrain-split-percent" name="terrain_split_percent" type="number" min="1" max="99" step="1" value="50">
+        </div>
         <div class="field">
           <div class="range-heading">
             <label for="relief-padding-percent">Route padding</label>
@@ -257,21 +271,21 @@
 
       <fieldset class="form-section relief-colors">
         <legend>Four print colors</legend>
-        <p class="help-text">Three elevation bands plus one raised track. The 3MF keeps them as separate printable parts.</p>
+        <p class="help-text">Green low terrain, brown high terrain, mapped blue water, and one raised orange track.</p>
         <div class="field-row">
           <div class="field">
             <label for="terrain-low-color">Low terrain</label>
             <input id="terrain-low-color" name="low_color" type="color" value="#4d6b50">
           </div>
           <div class="field">
-            <label for="terrain-mid-color">Middle terrain</label>
-            <input id="terrain-mid-color" name="mid_color" type="color" value="#b88a4a">
+            <label for="terrain-high-color">High terrain</label>
+            <input id="terrain-high-color" name="high_color" type="color" value="#8b5a2b">
           </div>
         </div>
         <div class="field-row">
           <div class="field">
-            <label for="terrain-high-color">High terrain</label>
-            <input id="terrain-high-color" name="high_color" type="color" value="#e8e0ca">
+            <label for="water-color">Lakes and rivers</label>
+            <input id="water-color" name="water_color" type="color" value="#2f75b5">
           </div>
           <div class="field">
             <label for="relief-track-color">Track</label>

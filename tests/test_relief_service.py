@@ -7,6 +7,7 @@ from outdoor_maps_plot.gpx import Route
 from outdoor_maps_plot.relief_options import ReliefConfig
 from outdoor_maps_plot.relief_service import render_relief
 from outdoor_maps_plot.service import CancellationToken, ProgressEvent, RenderCancelled
+from outdoor_maps_plot.water import WaterArea, WaterFeatures
 
 
 class FakeElevationProvider:
@@ -19,6 +20,14 @@ class FakeElevationProvider:
             for row in range(request.rows)
         )
         return ElevationGrid(values)
+
+
+class FakeWaterProvider:
+    cache_identity = "fake-water"
+    attribution = "Synthetic test water"
+
+    def load(self, projection, bounds, **kwargs) -> WaterFeatures:
+        return WaterFeatures(areas=(WaterArea(((2, 2), (18, 2), (18, 18), (2, 18), (2, 2))),))
 
 
 def _route() -> Route:
@@ -40,6 +49,7 @@ def test_render_relief_creates_four_part_3mf_and_reports_progress(tmp_path: Path
         ReliefConfig(width_mm=40, depth_mm=40, mesh_pitch_mm=10),
         progress=events.append,
         elevation_provider=FakeElevationProvider(),
+        water_provider=FakeWaterProvider(),
     )
 
     assert result.path == destination
@@ -62,4 +72,5 @@ def test_render_relief_honors_pre_cancelled_token(tmp_path: Path) -> None:
             ReliefConfig(width_mm=40, depth_mm=40, mesh_pitch_mm=10),
             cancellation=token,
             elevation_provider=FakeElevationProvider(),
+            water_provider=FakeWaterProvider(),
         )

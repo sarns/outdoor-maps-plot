@@ -29,6 +29,12 @@ from outdoor_maps_plot.service import (
     RenderCancelled,
     RenderResult,
 )
+from outdoor_maps_plot.water import (
+    OpenStreetMapWaterProvider,
+    WaterCancelled,
+    WaterError,
+    WaterProvider,
+)
 
 
 class ReliefError(ValueError):
@@ -83,6 +89,7 @@ def render_relief(
     cancellation: CancellationToken | None = None,
     *,
     elevation_provider: ElevationProvider | None = None,
+    water_provider: WaterProvider | None = None,
 ) -> RenderResult:
     """Fetch elevation data and create one validated, four-part 3MF model."""
 
@@ -115,16 +122,40 @@ def render_relief(
         _report(progress, "fetching_elevation", 15, "Preparing elevation data")
         elevation = provider.load(request, cancelled=lambda: token.cancelled)
         token.raise_if_cancelled()
-        _report(progress, "fetching_elevation", 55, "Elevation data ready")
+        _report(progress, "fetching_elevation", 50, "Elevation data ready")
+
+        mapped_water_provider = water_provider or OpenStreetMapWaterProvider(
+            cache_dir=cache / "water"
+        )
+        _report(progress, "fetching_water", 52, "Loading lakes and rivers")
+        water = mapped_water_provider.load(
+            model_route.projection,
+            model_route.terrain_bounds_m,
+            width_mm=config.width_mm,
+            depth_mm=config.depth_mm,
+            minimum_line_width_mm=config.waterway_width_mm,
+            cancelled=lambda: token.cancelled,
+        )
+        token.raise_if_cancelled()
+        _report(progress, "fetching_water", 58, "Water geometry ready")
 
         _report(progress, "building_mesh", 60, "Building printable terrain")
         route_lines = _simplify_routes(model_route.segments_mm, config, token)
-        model = build_relief_model(elevation.values_m, route_lines, config)
+        model = build_relief_model(elevation.values_m, route_lines, config, water)
         token.raise_if_cancelled()
         _report(progress, "validating_mesh", 88, "Checking printable geometry")
 
         _report(progress, "packaging", 92, "Packaging 3MF model")
-        attribution = getattr(provider, "attribution", provider.cache_identity)
+        attribution = "; ".join(
+            (
+                getattr(provider, "attribution", provider.cache_identity),
+                getattr(
+                    mapped_water_provider,
+                    "attribution",
+                    mapped_water_provider.cache_identity,
+                ),
+            )
+        )
         write_3mf(model, destination, config, elevation_attribution=attribution)
         token.raise_if_cancelled()
         result = RenderResult(
@@ -137,12 +168,21 @@ def render_relief(
         return result
     except ElevationCancelled as exc:
         raise RenderCancelled("Render cancelled") from exc
+    except WaterCancelled as exc:
+        raise RenderCancelled("Render cancelled") from exc
     except RenderCancelled:
         destination.unlink(missing_ok=True)
         raise
     except ReliefError:
         destination.unlink(missing_ok=True)
         raise
-    except (ElevationError, MeshValidationError, ValidationError, OSError, ValueError) as exc:
+    except (
+        ElevationError,
+        WaterError,
+        MeshValidationError,
+        ValidationError,
+        OSError,
+        ValueError,
+    ) as exc:
         destination.unlink(missing_ok=True)
         raise ReliefError(str(exc)) from exc

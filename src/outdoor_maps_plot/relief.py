@@ -13,6 +13,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from outdoor_maps_plot.relief_options import ReliefConfig
+from outdoor_maps_plot.water import WaterArea, WaterFeatures
 
 Point2D = tuple[float, float]
 Vertex = tuple[float, float, float]
@@ -33,12 +34,12 @@ class Mesh:
 class ReliefModel:
     """A complete four-material relief ready for validation and export."""
 
-    bodies: tuple[Mesh, Mesh, Mesh, Mesh]
+    bodies: tuple[Mesh, ...]
     width_mm: float
     depth_mm: float
     height_mm: float
     source_elevation_range: tuple[float, float]
-    band_heights_mm: tuple[float, float]
+    band_heights_mm: tuple[float, ...]
 
 
 class _MeshBuilder:
@@ -69,13 +70,15 @@ def build_relief_model(
     elevations: Sequence[Sequence[float]],
     route_lines_mm: Sequence[Sequence[Point2D]],
     config: ReliefConfig | None = None,
+    water_features: WaterFeatures | None = None,
 ) -> ReliefModel:
-    """Create three terrain elevation bands and one draped track body.
+    """Create two terrain bands, mapped water, and one draped track body.
 
     Elevations are linearly normalized into ``relief_height_mm``.  A constant
     grid is represented as a plateau at the full relief height, which keeps all
-    three required terrain materials printable.  Terrain bands are intersected
-    at 1/3 and 2/3 of relief height and share interfaces without overlapping.
+    required terrain materials printable. Terrain is split at the configured
+    percentage of relief height and the two bodies share a non-overlapping
+    interface. Water is raised slightly above the terrain surface.
 
     Route ribbons are robust for ordinary non-self-intersecting polylines.
     Crossing/overlapping route ribbons are not boolean-unioned in this bounded
@@ -99,16 +102,29 @@ def build_relief_model(
             for row in grid
         ]
 
-    first_band = config.base_thickness_mm + config.relief_height_mm / 3
-    second_band = config.base_thickness_mm + 2 * config.relief_height_mm / 3
+    split_height = config.base_thickness_mm + config.relief_height_mm * (
+        config.terrain_split_percent / 100
+    )
     surface_triangles = _surface_triangles(surface, config.width_mm, config.depth_mm)
 
-    low = _build_terrain_band(surface_triangles, 0.0, first_band, "terrain-low", config.low_color)
-    mid = _build_terrain_band(
-        surface_triangles, first_band, second_band, "terrain-mid", config.mid_color
-    )
+    low = _build_terrain_band(surface_triangles, 0.0, split_height, "terrain-low", config.low_color)
     high = _build_terrain_band(
-        surface_triangles, second_band, None, "terrain-high", config.high_color
+        surface_triangles, split_height, None, "terrain-high", config.high_color
+    )
+    water_mask = _water_mask(
+        water_features or WaterFeatures(),
+        rows,
+        columns,
+        config.width_mm,
+        config.depth_mm,
+    )
+    water = _build_water(
+        surface,
+        water_mask,
+        config.width_mm,
+        config.depth_mm,
+        config.water_height_mm,
+        config.water_color,
     )
     track = _build_track(
         surface,
@@ -119,15 +135,23 @@ def build_relief_model(
         config.track_height_mm,
         config.mesh_pitch_mm,
         config.track_color,
+        water_mask,
+        config.water_height_mm,
     )
 
+    bodies = (low, high, track) if water is None else (low, high, water, track)
+
     model = ReliefModel(
-        bodies=(low, mid, high, track),
+        bodies=bodies,
         width_mm=config.width_mm,
         depth_mm=config.depth_mm,
-        height_mm=config.base_thickness_mm + config.relief_height_mm + config.track_height_mm,
+        height_mm=(
+            config.base_thickness_mm
+            + config.relief_height_mm
+            + max(config.track_height_mm + config.water_height_mm, config.water_height_mm)
+        ),
         source_elevation_range=(source_min, source_max),
-        band_heights_mm=(first_band, second_band),
+        band_heights_mm=(split_height,),
     )
     # Keep invalid artifacts from ever reaching an exporter.
     from outdoor_maps_plot.mesh_validation import validate_relief_model
@@ -242,6 +266,8 @@ def _build_track(
     track_height: float,
     mesh_pitch: float,
     color: str,
+    water_mask: Sequence[Sequence[bool]],
+    water_height: float,
 ) -> Mesh:
     builder = _MeshBuilder()
     half_width = track_width / 2
@@ -266,6 +292,10 @@ def _build_track(
                     raise ValueError("route plus half its track width must fit inside the model")
             left_bottom_z = _sample_surface(surface, left[0], left[1], width, depth)
             right_bottom_z = _sample_surface(surface, right[0], right[1], width, depth)
+            if _sample_mask(water_mask, left[0], left[1], width, depth):
+                left_bottom_z += water_height
+            if _sample_mask(water_mask, right[0], right[1], width, depth):
+                right_bottom_z += water_height
             sections.append(
                 (
                     (left[0], left[1], left_bottom_z),
@@ -281,6 +311,121 @@ def _build_track(
     if not usable_lines:
         raise ValueError("at least one route polyline with two distinct points is required")
     return builder.mesh("track", color)
+
+
+def _water_mask(
+    features: WaterFeatures,
+    rows: int,
+    columns: int,
+    width: float,
+    depth: float,
+) -> list[list[bool]]:
+    cell_width = width / (columns - 1)
+    cell_depth = depth / (rows - 1)
+    line_margin = math.hypot(cell_width, cell_depth) / 2
+    mask: list[list[bool]] = []
+    for row in range(rows - 1):
+        output_row: list[bool] = []
+        y = (row + 0.5) * cell_depth
+        for column in range(columns - 1):
+            x = (column + 0.5) * cell_width
+            point = (x, y)
+            in_area = any(_point_in_area(point, area) for area in features.areas)
+            near_line = any(
+                _distance_to_line(point, line.points_mm) <= line.width_mm / 2 + line_margin
+                for line in features.lines
+            )
+            output_row.append(in_area or near_line)
+        mask.append(output_row)
+    return mask
+
+
+def _point_in_area(point: Point2D, area: WaterArea) -> bool:
+    return _point_in_polygon(point, area.outer_mm) and not any(
+        _point_in_polygon(point, hole) for hole in area.holes_mm
+    )
+
+
+def _point_in_polygon(point: Point2D, ring: Sequence[Point2D]) -> bool:
+    x, y = point
+    inside = False
+    for first, second in zip(ring, ring[1:], strict=False):
+        if (first[1] > y) != (second[1] > y):
+            crossing = first[0] + (second[0] - first[0]) * (y - first[1]) / (second[1] - first[1])
+            if x < crossing:
+                inside = not inside
+    return inside
+
+
+def _distance_to_line(point: Point2D, line: Sequence[Point2D]) -> float:
+    if len(line) < 2:
+        return math.inf
+    return min(
+        _distance_to_segment(point, first, second)
+        for first, second in zip(line, line[1:], strict=False)
+    )
+
+
+def _distance_to_segment(point: Point2D, first: Point2D, second: Point2D) -> float:
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    denominator = dx * dx + dy * dy
+    if denominator <= 1e-18:
+        return math.dist(point, first)
+    ratio = ((point[0] - first[0]) * dx + (point[1] - first[1]) * dy) / denominator
+    ratio = min(1.0, max(0.0, ratio))
+    return math.dist(point, (first[0] + ratio * dx, first[1] + ratio * dy))
+
+
+def _build_water(
+    surface: Sequence[Sequence[float]],
+    mask: Sequence[Sequence[bool]],
+    width: float,
+    depth: float,
+    height: float,
+    color: str,
+) -> Mesh | None:
+    if not any(any(row) for row in mask):
+        return None
+    rows, columns = len(surface), len(surface[0])
+    builder = _MeshBuilder()
+    for row in range(rows - 1):
+        y0, y1 = depth * row / (rows - 1), depth * (row + 1) / (rows - 1)
+        for column in range(columns - 1):
+            if not mask[row][column]:
+                continue
+            x0, x1 = width * column / (columns - 1), width * (column + 1) / (columns - 1)
+            b00 = (x0, y0, surface[row][column])
+            b10 = (x1, y0, surface[row][column + 1])
+            b11 = (x1, y1, surface[row + 1][column + 1])
+            b01 = (x0, y1, surface[row + 1][column])
+            t00, t10, t11, t01 = ((x, y, z + height) for x, y, z in (b00, b10, b11, b01))
+            builder.triangle(t00, t10, t11)
+            builder.triangle(t00, t11, t01)
+            builder.triangle(b00, b11, b10)
+            builder.triangle(b00, b01, b11)
+            if row == 0 or not mask[row - 1][column]:
+                builder.triangle(b00, b10, t10)
+                builder.triangle(b00, t10, t00)
+            if row == rows - 2 or not mask[row + 1][column]:
+                builder.triangle(b01, t01, t11)
+                builder.triangle(b01, t11, b11)
+            if column == 0 or not mask[row][column - 1]:
+                builder.triangle(b00, t00, t01)
+                builder.triangle(b00, t01, b01)
+            if column == columns - 2 or not mask[row][column + 1]:
+                builder.triangle(b10, b11, t11)
+                builder.triangle(b10, t11, t10)
+    return builder.mesh("water", color)
+
+
+def _sample_mask(
+    mask: Sequence[Sequence[bool]], x: float, y: float, width: float, depth: float
+) -> bool:
+    if not mask or not mask[0]:
+        return False
+    column = min(len(mask[0]) - 1, max(0, int(x / width * len(mask[0]))))
+    row = min(len(mask) - 1, max(0, int(y / depth * len(mask))))
+    return mask[row][column]
 
 
 def _resample_line(points: Sequence[Point2D], maximum_step: float) -> list[Point2D]:

@@ -9,6 +9,7 @@ from outdoor_maps_plot.export_3mf import CORE_NS, MATERIAL_NS, write_3mf
 from outdoor_maps_plot.mesh_validation import validate_relief_model
 from outdoor_maps_plot.relief import build_relief_model
 from outdoor_maps_plot.relief_options import ReliefConfig
+from outdoor_maps_plot.water import WaterArea, WaterFeatures, WaterLine
 
 
 def _config(**changes: object) -> ReliefConfig:
@@ -20,13 +21,17 @@ def _model(config: ReliefConfig | None = None):
         [[0, 40, 80], [20, 60, 100], [40, 80, 120]],
         [[(10, 10), (50, 45), (90, 70)]],
         config or _config(),
+        WaterFeatures(
+            areas=(WaterArea(((5, 5), (40, 5), (40, 30), (5, 30), (5, 5))),),
+            lines=(WaterLine(((40, 30), (80, 55)), 2.0),),
+        ),
     )
 
 
 def test_relief_config_defaults_and_limits() -> None:
     config = ReliefConfig()
     assert (config.width_mm, config.depth_mm) == (240, 240)
-    assert config.colors == ("#4D6B50", "#B88A4A", "#E8E0CA", "#E4431B")
+    assert config.colors == ("#4D6B50", "#8B5A2B", "#2F75B5", "#E4431B")
     assert config.output_format == "3mf"
     with pytest.raises(ValidationError):
         ReliefConfig(width_mm=256.01)
@@ -41,8 +46,8 @@ def test_builds_exactly_four_watertight_printable_bodies() -> None:
     validate_relief_model(model)
     assert [body.name for body in model.bodies] == [
         "terrain-low",
-        "terrain-mid",
         "terrain-high",
+        "water",
         "track",
     ]
     assert len({body.color for body in model.bodies}) == 4
@@ -51,7 +56,7 @@ def test_builds_exactly_four_watertight_printable_bodies() -> None:
     assert all(body.vertices and body.triangles for body in model.bodies)
 
 
-def test_constant_elevation_still_produces_all_three_terrain_bands() -> None:
+def test_constant_elevation_without_mapped_water_produces_dry_three_part_model() -> None:
     model = build_relief_model(
         [[42, 42], [42, 42]],
         [[(10, 10), (90, 70)]],
@@ -59,6 +64,7 @@ def test_constant_elevation_still_produces_all_three_terrain_bands() -> None:
     )
     validate_relief_model(model)
     assert model.source_elevation_range == (42, 42)
+    assert [body.name for body in model.bodies] == ["terrain-low", "terrain-high", "track"]
 
 
 def test_rejects_bad_grid_and_route_outside_printable_area() -> None:
@@ -90,15 +96,15 @@ def test_writes_four_material_3mf_in_millimetres(tmp_path) -> None:
     colors = root.findall(".//m:colorgroup/m:color", material_namespace)
     assert [color.attrib["color"] for color in colors] == [
         "#4D6B50FF",
-        "#B88A4AFF",
-        "#E8E0CAFF",
+        "#8B5A2BFF",
+        "#2F75B5FF",
         "#E4431BFF",
     ]
     objects = root.findall(".//m:object", namespace)
     assert [item.attrib["name"] for item in objects] == [
         "terrain-low",
-        "terrain-mid",
         "terrain-high",
+        "water",
         "track",
     ]
     assert [item.attrib["pid"] for item in objects] == ["1", "1", "1", "1"]

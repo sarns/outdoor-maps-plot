@@ -36,9 +36,9 @@ def test_relief_cli_maps_print_dimensions_and_four_colors(
             "120",
             "--terrain-low-color",
             "#112233",
-            "--terrain-mid-color",
-            "#445566",
             "--terrain-high-color",
+            "#445566",
+            "--water-color",
             "#778899",
             "--track-color",
             "#aabbcc",
@@ -49,7 +49,7 @@ def test_relief_cli_maps_print_dimensions_and_four_colors(
     assert isinstance(config, ReliefConfig)
     assert config.width_mm == 180
     assert config.depth_mm == 120
-    assert [config.low_color, config.mid_color, config.high_color, config.track_color] == [
+    assert [config.low_color, config.high_color, config.water_color, config.track_color] == [
         "#112233",
         "#445566",
         "#778899",

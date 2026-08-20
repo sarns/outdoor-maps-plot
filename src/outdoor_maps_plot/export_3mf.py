@@ -32,8 +32,15 @@ def write_3mf(
     """
 
     validate_relief_model(model)
-    if config is not None and tuple(body.color for body in model.bodies) != config.colors:
-        raise ValueError("model material colors do not match ReliefConfig")
+    if config is not None:
+        expected = {
+            "terrain-low": config.low_color,
+            "terrain-high": config.high_color,
+            "water": config.water_color,
+            "track": config.track_color,
+        }
+        if any(body.color != expected[body.name] for body in model.bodies):
+            raise ValueError("model material colors do not match ReliefConfig")
 
     destination = Path(destination)
     if destination.suffix.lower() != ".3mf":
