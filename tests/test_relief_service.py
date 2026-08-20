@@ -147,5 +147,5 @@ def test_render_relief_reports_incremental_water_progress(tmp_path: Path) -> Non
     )
 
     water_messages = [event.message for event in events if event.phase == "fetching_water"]
-    assert "Loading lakes and rivers (1/2)" in water_messages
-    assert "Loading lakes and rivers (2/2)" in water_messages
+    assert "Loading large lakes (1/2)" in water_messages
+    assert "Loading large lakes (2/2)" in water_messages

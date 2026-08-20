@@ -75,7 +75,7 @@ class WaterProvider(Protocol):
         *,
         width_mm: float,
         depth_mm: float,
-        minimum_line_width_mm: float,
+        minimum_area_mm2: float,
         cancelled: CancelCheck | None = None,
         progress: WaterProgress | None = None,
     ) -> WaterFeatures: ...
@@ -85,7 +85,7 @@ WaterFetcher = Callable[[str, bytes, int], bytes]
 
 
 class OpenStreetMapWaterProvider:
-    """Load lakes and flowing waterways through the public Overpass API."""
+    """Load large lakes and reservoirs through the public Overpass API."""
 
     def __init__(
         self,
@@ -94,12 +94,12 @@ class OpenStreetMapWaterProvider:
         endpoint: str | None = None,
         endpoints: Sequence[str] | None = None,
         timeout_seconds: float = 6.0,
-        total_timeout_seconds: float = 20.0,
+        total_timeout_seconds: float = 15.0,
         max_response_bytes: int = 64 * 1024 * 1024,
         max_coordinates: int = 500_000,
-        max_query_tiles: int = 16,
-        target_tile_span_km: float = 50.0,
-        max_workers: int = 8,
+        max_query_tiles: int = 4,
+        target_tile_span_km: float = 100.0,
+        max_workers: int = 4,
         max_endpoint_attempts: int = 1,
         fetcher: WaterFetcher | None = None,
     ) -> None:
@@ -177,21 +177,16 @@ class OpenStreetMapWaterProvider:
         *,
         width_mm: float,
         depth_mm: float,
-        minimum_line_width_mm: float,
+        minimum_area_mm2: float,
         cancelled: CancelCheck | None = None,
         progress: WaterProgress | None = None,
     ) -> WaterFeatures:
         _check_cancelled(cancelled)
+        if not math.isfinite(minimum_area_mm2) or minimum_area_mm2 <= 0:
+            raise WaterError("minimum printed lake area must be positive")
         south, west, north, east = _geo_bounds(projection, bounds)
-        metres_per_model_mm = bounds.width / width_mm
-        include_minor_waterways = metres_per_model_mm <= 200.0
-        major_water_only = metres_per_model_mm > 200.0
         queries = tuple(
-            _query(
-                *tile,
-                include_minor_waterways=include_minor_waterways,
-                major_water_only=major_water_only,
-            )
+            _query(*tile)
             for tile in _query_tiles(
                 south,
                 west,
@@ -202,7 +197,6 @@ class OpenStreetMapWaterProvider:
             )
         )
         areas: list[WaterArea] = []
-        lines: list[WaterLine] = []
         bytes_used = 0
         coordinates_used = 0
         completed_queries = 0
@@ -238,7 +232,7 @@ class OpenStreetMapWaterProvider:
                         bounds,
                         width_mm,
                         depth_mm,
-                        minimum_line_width_mm,
+                        minimum_area_mm2,
                         remaining_coordinates,
                         cancelled,
                     )
@@ -249,7 +243,6 @@ class OpenStreetMapWaterProvider:
                 bytes_used += len(payload)
                 coordinates_used += coordinate_count
                 areas.extend(features.areas)
-                lines.extend(features.lines)
                 completed_queries += 1
         except FuturesTimeoutError:
             timed_out = True
@@ -260,7 +253,7 @@ class OpenStreetMapWaterProvider:
             raise WaterError("could not download OpenStreetMap water geometry for any map tile")
         return WaterFeatures(
             tuple(dict.fromkeys(areas)),
-            tuple(dict.fromkeys(lines)),
+            (),
             complete=not timed_out and completed_queries == len(queries),
         )
 
@@ -300,34 +293,14 @@ def _query(
     west: float,
     north: float,
     east: float,
-    *,
-    include_minor_waterways: bool,
-    major_water_only: bool,
 ) -> str:
     bbox = f"{south:.7f},{west:.7f},{north:.7f},{east:.7f}"
-    if major_water_only:
-        natural_water = (
-            f'way["natural"="water"]["water"~"^(lake|reservoir|river|canal)$"]({bbox});'
-            f'relation["natural"="water"]["water"~"^(lake|reservoir|river|canal)$"]({bbox});'
-            f'way["natural"="water"]["name"]({bbox});'
-            f'relation["natural"="water"]["name"]({bbox});'
-        )
-    else:
-        natural_water = f'way["natural"="water"]({bbox});relation["natural"="water"]({bbox});'
-    minor = (
-        f'way["waterway"="stream"]({bbox});way["waterway"="ditch"]({bbox});'
-        f'way["waterway"="drain"]({bbox});'
-        if include_minor_waterways
-        else ""
-    )
     return (
         "[out:json][timeout:6];("
-        f"{natural_water}"
-        f'way["waterway"="riverbank"]({bbox});'
-        f'relation["waterway"="riverbank"]({bbox});'
-        f'way["landuse"="reservoir"]({bbox});way["landuse"="basin"]({bbox});'
-        f'way["waterway"="river"]({bbox});way["waterway"="canal"]({bbox});'
-        f"{minor}"
+        f'way["natural"="water"]["water"~"^(lake|reservoir)$"]({bbox});'
+        f'relation["natural"="water"]["water"~"^(lake|reservoir)$"]({bbox});'
+        f'way["landuse"="reservoir"]({bbox});'
+        f'relation["landuse"="reservoir"]({bbox});'
         ");out geom qt;"
     )
 
@@ -396,7 +369,7 @@ def _parse(
     bounds: MetricBounds,
     width_mm: float,
     depth_mm: float,
-    minimum_line_width_mm: float,
+    minimum_area_mm2: float,
     max_coordinates: int,
     cancelled: CancelCheck | None,
 ) -> tuple[WaterFeatures, int]:
@@ -409,9 +382,7 @@ def _parse(
         raise WaterError("OpenStreetMap water response has an invalid element list")
 
     areas: list[WaterArea] = []
-    lines: list[WaterLine] = []
     coordinate_count = 0
-    scale = width_mm / bounds.width
 
     def model_points(raw: object) -> tuple[Point2D, ...]:
         nonlocal coordinate_count
@@ -452,34 +423,40 @@ def _parse(
             holes = tuple(_stitch_closed(inner_segments))
             for outer in _stitch_closed(outer_segments):
                 matching = tuple(hole for hole in holes if _point_in_ring(hole[0], outer))
-                areas.append(WaterArea(outer, matching))
+                area = WaterArea(outer, matching)
+                if _water_area_mm2(area) >= minimum_area_mm2:
+                    areas.append(area)
             continue
 
         points = model_points(element.get("geometry"))
         if len(points) < 2:
             continue
-        waterway = tags.get("waterway")
         is_area = points[0] == points[-1] and (
-            tags.get("natural") == "water"
-            or waterway == "riverbank"
-            or tags.get("landuse") in {"reservoir", "basin"}
+            tags.get("natural") == "water" or tags.get("landuse") == "reservoir"
         )
         if is_area and len(points) >= 4:
-            areas.append(WaterArea(points))
-        elif waterway in {"river", "stream", "canal", "ditch", "drain"}:
-            width_m = _numeric_width(tags.get("width"))
-            lines.append(WaterLine(points, max(minimum_line_width_mm, width_m * scale)))
-    return WaterFeatures(tuple(areas), tuple(lines)), coordinate_count
+            area = WaterArea(points)
+            if _water_area_mm2(area) >= minimum_area_mm2:
+                areas.append(area)
+    return WaterFeatures(tuple(areas)), coordinate_count
 
 
-def _numeric_width(value: object) -> float:
-    if not isinstance(value, str):
-        return 0.0
-    try:
-        number = float(value.strip())
-    except ValueError:
-        return 0.0
-    return number if math.isfinite(number) and number > 0 else 0.0
+def _water_area_mm2(area: WaterArea) -> float:
+    return max(
+        0.0,
+        abs(_signed_ring_area(area.outer_mm))
+        - sum(abs(_signed_ring_area(hole)) for hole in area.holes_mm),
+    )
+
+
+def _signed_ring_area(ring: tuple[Point2D, ...]) -> float:
+    return (
+        sum(
+            first[0] * second[1] - second[0] * first[1]
+            for first, second in zip(ring, ring[1:], strict=False)
+        )
+        / 2
+    )
 
 
 def _stitch_closed(segments: list[tuple[Point2D, ...]]) -> list[tuple[Point2D, ...]]:

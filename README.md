@@ -140,19 +140,20 @@ the approximate route area to the elevation hosting service. For long routes,
 the renderer automatically selects the highest elevation zoom that stays within
 its tile-download safety limit.
 
-Lakes and rivers are loaded as bounded vector geometry from OpenStreetMap via
+Large lakes and reservoirs are loaded as bounded vector geometry from OpenStreetMap via
 public Overpass API instances and cached locally. The renderer tries multiple
 public endpoints; if all are unavailable, it completes without water and reports
 a warning instead of failing the entire 3D export. Large map extents are divided
-into up to 16 bounded requests, processed by eight parallel workers with short
-per-request timeouts and a 20-second overall deadline. Requests are distributed
+into up to four bounded requests, processed by four parallel workers with short
+per-request timeouts and a 15-second overall deadline. Requests are distributed
 across the public endpoints instead of immediately retrying a busy service.
 Progress is reported for every completed section. Unavailable sections are
 reported as incomplete water.
-Rivers are widened to a configurable
-minimum printable width (`--waterway-width-mm`, default 1.2 mm). This request
-also reveals the approximate route area to the contacted Overpass services. Areas without
-mapped water produce a valid three-part model without an unused blue body.
+Water bodies smaller than `--minimum-lake-area-mm2` (default 9 mm² in the printed
+model) are omitted. Rivers, canals, streams, ponds, and basins are not requested.
+This request also reveals the approximate route area to the contacted Overpass
+services. Areas without a sufficiently large mapped lake produce a valid
+three-part model without an unused blue body.
 
 ### Raster output
 

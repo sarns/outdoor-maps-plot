@@ -87,7 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.8,
     )
     parser.add_argument("--water-height-mm", type=_positive_float("water height"), default=0.4)
-    parser.add_argument("--waterway-width-mm", type=_positive_float("waterway width"), default=1.2)
+    parser.add_argument(
+        "--minimum-lake-area-mm2",
+        type=_positive_float("minimum lake area"),
+        default=9.0,
+        help="smallest lake footprint included in the printed model",
+    )
     parser.add_argument(
         "--terrain-split-percent",
         type=_positive_float("terrain split"),
@@ -139,7 +144,7 @@ def main(argv: list[str] | None = None) -> None:
             track_width_mm=args.track_width_mm,
             track_height_mm=args.track_height_mm,
             water_height_mm=args.water_height_mm,
-            waterway_width_mm=args.waterway_width_mm,
+            minimum_lake_area_mm2=args.minimum_lake_area_mm2,
             mesh_pitch_mm=args.mesh_pitch_mm,
             padding_percent=args.padding_percent,
             terrain_split_percent=args.terrain_split_percent,

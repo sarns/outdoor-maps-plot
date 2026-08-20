@@ -101,7 +101,7 @@ def test_ui_exposes_separate_four_color_relief_product() -> None:
         "track_width_mm",
         "track_height_mm",
         "water_height_mm",
-        "waterway_width_mm",
+        "minimum_lake_area_mm2",
         "terrain_split_percent",
         "mesh_pitch_mm",
         "low_color",

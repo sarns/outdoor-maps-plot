@@ -37,7 +37,7 @@ def _document() -> bytes:
     ).encode()
 
 
-def test_osm_water_provider_maps_lakes_and_rivers_to_model_space() -> None:
+def test_osm_water_provider_maps_only_large_lakes_to_model_space() -> None:
     requests: list[bytes] = []
 
     def fetch(_url: str, body: bytes, _limit: int) -> bytes:
@@ -50,13 +50,13 @@ def test_osm_water_provider_maps_lakes_and_rivers_to_model_space() -> None:
         MetricBounds(-500, -500, 500, 500),
         width_mm=100,
         depth_mm=100,
-        minimum_line_width_mm=1.2,
+        minimum_area_mm2=9,
     )
 
     assert len(features.areas) == 1
-    assert len(features.lines) == 1
-    assert features.lines[0].width_mm == pytest.approx(2.0)
+    assert not features.lines
     assert b"natural%22%3D%22water" in requests[0]
+    assert b"waterway" not in requests[0]
     assert all(0 < value < 100 for point in features.areas[0].outer_mm for value in point)
 
 
@@ -68,7 +68,7 @@ def test_osm_water_provider_honors_cancellation_before_fetch() -> None:
             MetricBounds(-500, -500, 500, 500),
             width_mm=100,
             depth_mm=100,
-            minimum_line_width_mm=1.2,
+            minimum_area_mm2=9,
             cancelled=lambda: True,
         )
 
@@ -92,7 +92,7 @@ def test_osm_water_provider_uses_next_endpoint_after_network_failure() -> None:
         MetricBounds(-500, -500, 500, 500),
         width_mm=100,
         depth_mm=100,
-        minimum_line_width_mm=1.2,
+        minimum_area_mm2=9,
     )
 
     assert len(requested_urls) == 2
@@ -119,16 +119,16 @@ def test_osm_water_provider_tiles_large_extents_and_deduplicates_features() -> N
         MetricBounds(-100_000, -100_000, 100_000, 100_000),
         width_mm=100,
         depth_mm=100,
-        minimum_line_width_mm=1.2,
+        minimum_area_mm2=0.0001,
         progress=lambda completed, total: progress.append((completed, total)),
     )
 
     assert 1 < len(requests) <= 4
     assert progress == [(index, len(requests)) for index in range(1, len(requests) + 1)]
-    assert all(b"stream" not in body for body in requests)
-    assert all(b"%22name%22" in body for body in requests)
+    assert all(b"waterway" not in body for body in requests)
+    assert all(b"lake%7Creservoir" in body for body in requests)
     assert len(features.areas) == 1
-    assert len(features.lines) == 1
+    assert not features.lines
     assert features.complete
 
 
@@ -153,7 +153,7 @@ def test_osm_water_provider_returns_partial_result_when_one_tile_fails() -> None
         MetricBounds(-50_000, -50_000, 50_000, 50_000),
         width_mm=100,
         depth_mm=100,
-        minimum_line_width_mm=1.2,
+        minimum_area_mm2=0.0001,
     )
 
     assert queries_seen > 1
@@ -180,7 +180,7 @@ def test_osm_water_provider_fetches_tiles_concurrently() -> None:
         MetricBounds(-50_000, -50_000, 50_000, 50_000),
         width_mm=100,
         depth_mm=100,
-        minimum_line_width_mm=1.2,
+        minimum_area_mm2=0.0001,
     )
 
     assert not features.empty
@@ -207,5 +207,18 @@ def test_osm_water_provider_enforces_total_deadline() -> None:
             MetricBounds(-50_000, -50_000, 50_000, 50_000),
             width_mm=100,
             depth_mm=100,
-            minimum_line_width_mm=1.2,
+            minimum_area_mm2=9,
         )
+
+
+def test_osm_water_provider_omits_lakes_below_printed_area_threshold() -> None:
+    provider = OpenStreetMapWaterProvider(fetcher=lambda *_args: _document())
+    features = provider.load(
+        LocalMetricProjection(47.0, 10.0),
+        MetricBounds(-500, -500, 500, 500),
+        width_mm=100,
+        depth_mm=100,
+        minimum_area_mm2=10_000,
+    )
+
+    assert features.empty

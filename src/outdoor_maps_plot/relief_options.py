@@ -27,7 +27,7 @@ class ReliefConfig(BaseModel):
     track_width_mm: float = Field(default=1.6, gt=0, le=25)
     track_height_mm: float = Field(default=0.8, gt=0, le=25)
     water_height_mm: float = Field(default=0.4, gt=0, le=5)
-    waterway_width_mm: float = Field(default=1.2, gt=0, le=25)
+    minimum_lake_area_mm2: float = Field(default=9.0, gt=0, le=10_000)
     mesh_pitch_mm: float = Field(default=0.8, gt=0, le=10)
     padding_percent: float = Field(default=6.0, ge=0, le=50)
     terrain_split_percent: float = Field(default=50.0, gt=0, lt=100)

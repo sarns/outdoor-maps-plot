@@ -237,7 +237,7 @@ class JobManager:
             "validating": "Validating 3D relief configuration",
             "parsing": "Preparing routes",
             "fetching_elevation": "Preparing elevation data",
-            "fetching_water": "Loading lakes and rivers",
+            "fetching_water": "Loading large lakes",
             "building_mesh": "Building printable terrain",
             "validating_mesh": "Checking printable geometry",
             "packaging": "Packaging 3MF model",

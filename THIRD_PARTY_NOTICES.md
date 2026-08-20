@@ -55,7 +55,7 @@ applicable source credit for the region represented by a generated model.
 
 ## Water geometry
 
-Relief lakes and rivers use OpenStreetMap data requested through the public
+Relief lakes and reservoirs use OpenStreetMap data requested through the public
 Overpass API. OpenStreetMap data is available under the Open Data Commons Open
 Database License (ODbL); generated 3MF metadata retains contributor attribution.
 

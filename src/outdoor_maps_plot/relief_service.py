@@ -131,7 +131,7 @@ def render_relief(
         mapped_water_provider = water_provider or OpenStreetMapWaterProvider(
             cache_dir=cache / "water"
         )
-        _report(progress, "fetching_water", 52, "Loading lakes and rivers")
+        _report(progress, "fetching_water", 52, "Loading large lakes")
         warnings: list[str] = []
         try:
             water = mapped_water_provider.load(
@@ -139,13 +139,13 @@ def render_relief(
                 model_route.terrain_bounds_m,
                 width_mm=config.width_mm,
                 depth_mm=config.depth_mm,
-                minimum_line_width_mm=config.waterway_width_mm,
+                minimum_area_mm2=config.minimum_lake_area_mm2,
                 cancelled=lambda: token.cancelled,
                 progress=lambda completed, total: _report(
                     progress,
                     "fetching_water",
                     52 + round(5 * completed / total),
-                    f"Loading lakes and rivers ({completed}/{total})",
+                    f"Loading large lakes ({completed}/{total})",
                 ),
             )
             water_attribution = getattr(

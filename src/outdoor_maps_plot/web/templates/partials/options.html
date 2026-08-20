@@ -252,8 +252,8 @@
             <input id="water-height-mm" name="water_height_mm" type="number" min="0.1" step="0.1" value="0.4">
           </div>
           <div class="field">
-            <label for="waterway-width-mm">Minimum river width <span>mm</span></label>
-            <input id="waterway-width-mm" name="waterway_width_mm" type="number" min="0.1" step="0.1" value="1.2">
+            <label for="minimum-lake-area-mm2">Minimum lake area <span>mm²</span></label>
+            <input id="minimum-lake-area-mm2" name="minimum_lake_area_mm2" type="number" min="0.1" step="0.5" value="9">
           </div>
         </div>
         <div class="field">
@@ -271,7 +271,7 @@
 
       <fieldset class="form-section relief-colors">
         <legend>Four print colors</legend>
-        <p class="help-text">Green low terrain, brown high terrain, mapped blue water, and one raised orange track.</p>
+        <p class="help-text">Green low terrain, brown high terrain, mapped blue large lakes, and one raised orange track.</p>
         <div class="field-row">
           <div class="field">
             <label for="terrain-low-color">Low terrain</label>
@@ -284,7 +284,7 @@
         </div>
         <div class="field-row">
           <div class="field">
-            <label for="water-color">Lakes and rivers</label>
+            <label for="water-color">Large lakes</label>
             <input id="water-color" name="water_color" type="color" value="#2f75b5">
           </div>
           <div class="field">

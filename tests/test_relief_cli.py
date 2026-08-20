@@ -40,6 +40,8 @@ def test_relief_cli_maps_print_dimensions_and_four_colors(
             "#445566",
             "--water-color",
             "#778899",
+            "--minimum-lake-area-mm2",
+            "12.5",
             "--track-color",
             "#aabbcc",
         ]
@@ -49,6 +51,7 @@ def test_relief_cli_maps_print_dimensions_and_four_colors(
     assert isinstance(config, ReliefConfig)
     assert config.width_mm == 180
     assert config.depth_mm == 120
+    assert config.minimum_lake_area_mm2 == 12.5
     assert [config.low_color, config.high_color, config.water_color, config.track_color] == [
         "#112233",
         "#445566",
