@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,8 +34,11 @@ from outdoor_maps_plot.water import (
     OpenStreetMapWaterProvider,
     WaterCancelled,
     WaterError,
+    WaterFeatures,
     WaterProvider,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ReliefError(ValueError):
@@ -128,16 +132,41 @@ def render_relief(
             cache_dir=cache / "water"
         )
         _report(progress, "fetching_water", 52, "Loading lakes and rivers")
-        water = mapped_water_provider.load(
-            model_route.projection,
-            model_route.terrain_bounds_m,
-            width_mm=config.width_mm,
-            depth_mm=config.depth_mm,
-            minimum_line_width_mm=config.waterway_width_mm,
-            cancelled=lambda: token.cancelled,
-        )
+        warnings: list[str] = []
+        try:
+            water = mapped_water_provider.load(
+                model_route.projection,
+                model_route.terrain_bounds_m,
+                width_mm=config.width_mm,
+                depth_mm=config.depth_mm,
+                minimum_line_width_mm=config.waterway_width_mm,
+                cancelled=lambda: token.cancelled,
+            )
+            water_attribution = getattr(
+                mapped_water_provider,
+                "attribution",
+                mapped_water_provider.cache_identity,
+            )
+        except WaterCancelled:
+            raise
+        except WaterError as exc:
+            LOGGER.warning(
+                "Water geometry unavailable; continuing without water: %s",
+                exc,
+                exc_info=True,
+            )
+            water = WaterFeatures()
+            water_attribution = "Water geometry unavailable during generation"
+            warnings.append(
+                "OpenStreetMap water was unavailable; the relief was generated without water."
+            )
         token.raise_if_cancelled()
-        _report(progress, "fetching_water", 58, "Water geometry ready")
+        _report(
+            progress,
+            "fetching_water",
+            58,
+            "Water geometry ready" if not warnings else warnings[-1],
+        )
 
         _report(progress, "building_mesh", 60, "Building printable terrain")
         route_lines = _simplify_routes(model_route.segments_mm, config, token)
@@ -149,11 +178,7 @@ def render_relief(
         attribution = "; ".join(
             (
                 getattr(provider, "attribution", provider.cache_identity),
-                getattr(
-                    mapped_water_provider,
-                    "attribution",
-                    mapped_water_provider.cache_identity,
-                ),
+                water_attribution,
             )
         )
         write_3mf(model, destination, config, elevation_attribution=attribution)
@@ -163,6 +188,7 @@ def render_relief(
             output_format="3mf",
             media_type="model/3mf",
             size_bytes=destination.stat().st_size,
+            warnings=tuple(warnings),
         )
         _report(progress, "finalizing", 100, "3D relief ready")
         return result

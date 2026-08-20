@@ -7,7 +7,7 @@ from outdoor_maps_plot.gpx import Route
 from outdoor_maps_plot.relief_options import ReliefConfig
 from outdoor_maps_plot.relief_service import render_relief
 from outdoor_maps_plot.service import CancellationToken, ProgressEvent, RenderCancelled
-from outdoor_maps_plot.water import WaterArea, WaterFeatures
+from outdoor_maps_plot.water import WaterArea, WaterError, WaterFeatures
 
 
 class FakeElevationProvider:
@@ -28,6 +28,14 @@ class FakeWaterProvider:
 
     def load(self, projection, bounds, **kwargs) -> WaterFeatures:
         return WaterFeatures(areas=(WaterArea(((2, 2), (18, 2), (18, 18), (2, 18), (2, 2))),))
+
+
+class UnavailableWaterProvider:
+    cache_identity = "unavailable-water"
+    attribution = "Unavailable test water"
+
+    def load(self, projection, bounds, **kwargs) -> WaterFeatures:
+        raise WaterError("test service is offline")
 
 
 def _route() -> Route:
@@ -74,3 +82,24 @@ def test_render_relief_honors_pre_cancelled_token(tmp_path: Path) -> None:
             elevation_provider=FakeElevationProvider(),
             water_provider=FakeWaterProvider(),
         )
+
+
+def test_render_relief_completes_with_warning_when_water_service_is_offline(
+    tmp_path: Path,
+) -> None:
+    events: list[ProgressEvent] = []
+    result = render_relief(
+        [_route()],
+        tmp_path / "relief-without-water.3mf",
+        tmp_path / "cache",
+        ReliefConfig(width_mm=40, depth_mm=40, mesh_pitch_mm=10),
+        progress=events.append,
+        elevation_provider=FakeElevationProvider(),
+        water_provider=UnavailableWaterProvider(),
+    )
+
+    assert result.path.is_file()
+    assert result.warnings == (
+        "OpenStreetMap water was unavailable; the relief was generated without water.",
+    )
+    assert any("without water" in event.message for event in events)

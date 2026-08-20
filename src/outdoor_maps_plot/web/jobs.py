@@ -182,6 +182,8 @@ class JobManager:
                 ready_message = (
                     "3D relief ready" if job.product_kind == "relief" else "Poster ready"
                 )
+                if result.warnings:
+                    ready_message = f"{ready_message} — {' '.join(result.warnings)}"
                 job.progress = ProgressEvent("finalizing", 100, ready_message, utc_now())
         except RenderCancelled:
             with self._lock:

@@ -17,6 +17,7 @@ RenderPhase = Literal[
     "parsing",
     "fetching_map",
     "fetching_elevation",
+    "fetching_water",
     "drawing",
     "building_mesh",
     "validating_mesh",
@@ -68,6 +69,7 @@ class RenderResult:
     output_format: str
     media_type: str
     size_bytes: int
+    warnings: tuple[str, ...] = ()
 
 
 MEDIA_TYPES = {

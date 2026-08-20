@@ -68,8 +68,9 @@ class FakeRenderer:
 
 
 class FakeReliefRenderer:
-    def __init__(self) -> None:
+    def __init__(self, *, warnings: tuple[str, ...] = ()) -> None:
         self.calls: list[dict[str, object]] = []
+        self.warnings = warnings
 
     def __call__(
         self,
@@ -96,6 +97,7 @@ class FakeReliefRenderer:
             "3mf",
             "model/3mf",
             destination.stat().st_size,
+            self.warnings,
         )
 
 
@@ -431,6 +433,21 @@ def test_relief_preview_is_explicitly_unavailable(settings: WebSettings) -> None
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "relief_preview_unavailable"
+
+
+def test_relief_success_exposes_non_fatal_water_warning(settings: WebSettings) -> None:
+    relief_renderer = FakeReliefRenderer(warnings=("Water unavailable; generated dry.",))
+    app = create_app(settings, FakeRenderer(), relief_renderer)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        uploaded = upload(client)
+        accepted = client.post(
+            "/api/renders",
+            json={"upload_id": uploaded["upload_id"], "product_kind": "relief", "config": {}},
+        )
+        result = wait_for_terminal(client, accepted.json()["job_id"])
+
+    assert result["status"] == "succeeded"
+    assert "Water unavailable; generated dry." in result["progress"]["message"]
 
 
 @pytest.mark.parametrize(("field", "value"), [("width_mm", 256.1), ("depth_mm", 300)])

@@ -10,7 +10,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -20,6 +20,11 @@ from outdoor_maps_plot.projection import LocalMetricProjection, MetricBounds
 Point2D = tuple[float, float]
 CancelCheck = Callable[[], bool]
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_ENDPOINTS = (
+    OVERPASS_URL,
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
 
 
 class WaterError(ValueError):
@@ -81,7 +86,8 @@ class OpenStreetMapWaterProvider:
         self,
         *,
         cache_dir: Path | None = None,
-        endpoint: str = OVERPASS_URL,
+        endpoint: str | None = None,
+        endpoints: Sequence[str] | None = None,
         timeout_seconds: float = 30.0,
         max_response_bytes: int = 16 * 1024 * 1024,
         max_coordinates: int = 250_000,
@@ -89,8 +95,22 @@ class OpenStreetMapWaterProvider:
     ) -> None:
         if timeout_seconds <= 0 or max_response_bytes < 1024 or max_coordinates < 10:
             raise WaterError("water provider resource limits must be positive")
+        if endpoint is not None and endpoints is not None:
+            raise WaterError("configure either one water endpoint or an endpoint list")
+        if endpoints is not None:
+            configured_endpoints = tuple(endpoints)
+        elif endpoint is not None:
+            configured_endpoints = (endpoint,)
+        else:
+            configured_endpoints = OVERPASS_ENDPOINTS
+        if not configured_endpoints or any(
+            not value.startswith("https://") for value in configured_endpoints
+        ):
+            raise WaterError("water endpoints must be non-empty HTTPS URLs")
         self.cache_dir = cache_dir
-        self.endpoint = endpoint
+        self.endpoints = configured_endpoints
+        # Keep the original public attribute for callers that configured one endpoint.
+        self.endpoint = configured_endpoints[0]
         self.timeout_seconds = timeout_seconds
         self.max_response_bytes = max_response_bytes
         self.max_coordinates = max_coordinates
@@ -98,7 +118,7 @@ class OpenStreetMapWaterProvider:
 
     @property
     def cache_identity(self) -> str:
-        digest = hashlib.sha256(self.endpoint.encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha256("\n".join(self.endpoints).encode("utf-8")).hexdigest()[:12]
         return f"osm-water:{digest}"
 
     @property
@@ -147,9 +167,7 @@ class OpenStreetMapWaterProvider:
             payload = cache_path.read_bytes()
         else:
             body = urllib.parse.urlencode({"data": query}).encode("ascii")
-            payload = self.fetcher(self.endpoint, body, self.max_response_bytes)
-            if not payload or len(payload) > self.max_response_bytes:
-                raise WaterError("OpenStreetMap water response is empty or too large")
+            payload = self._fetch_from_available_endpoint(body)
             if cache_path is not None:
                 _atomic_cache_write(cache_path, payload)
         _check_cancelled(cancelled)
@@ -163,6 +181,20 @@ class OpenStreetMapWaterProvider:
             self.max_coordinates,
             cancelled,
         )
+
+    def _fetch_from_available_endpoint(self, body: bytes) -> bytes:
+        last_error: WaterError | None = None
+        for endpoint in self.endpoints:
+            try:
+                payload = self.fetcher(endpoint, body, self.max_response_bytes)
+                if not payload or len(payload) > self.max_response_bytes:
+                    raise WaterError("OpenStreetMap water response is empty or too large")
+                return payload
+            except WaterError as exc:
+                last_error = exc
+        raise WaterError(
+            "could not download OpenStreetMap water geometry from any public endpoint"
+        ) from last_error
 
 
 def _query(south: float, west: float, north: float, east: float) -> str:
