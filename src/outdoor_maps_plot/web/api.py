@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from outdoor_maps_plot.gpx import SUPPORTED_ROUTE_EXTENSIONS, PointBudget
 from outdoor_maps_plot.options import NAMED_PAPER_SIZES, PosterConfig
+from outdoor_maps_plot.relief_options import ReliefConfig
 from outdoor_maps_plot.styles import PROVIDERS, STYLES
 from outdoor_maps_plot.web.config import HARD_MAX_FILES, WebSettings
 from outdoor_maps_plot.web.errors import ApiError
@@ -82,6 +83,7 @@ def render_response(job: RenderJob) -> RenderStatusResponse:
         job_id=job.job_id,
         upload_id=job.upload_id,
         mode=job.mode,
+        product_kind=job.product_kind,
         status=job.status,
         progress=ProgressResponse(
             phase=job.progress.phase,
@@ -104,7 +106,9 @@ def get_config(request: Request) -> dict[str, object]:
     schema = PosterConfig.model_json_schema()
     return {
         "defaults": PosterConfig().model_dump(mode="json"),
+        "relief_defaults": ReliefConfig().model_dump(mode="json"),
         "poster_schema": schema,
+        "relief_schema": ReliefConfig.model_json_schema(),
         "paper_sizes": list(NAMED_PAPER_SIZES),
         "styles": [
             {
@@ -137,6 +141,7 @@ def get_config(request: Request) -> dict[str, object]:
         },
         "route_extensions": sorted(SUPPORTED_ROUTE_EXTENSIONS),
         "output_formats": ["pdf", "png", "jpeg"],
+        "relief_output_formats": ["3mf"],
     }
 
 
@@ -209,12 +214,18 @@ def delete_upload(request: Request, upload_id: str) -> DeleteResponse:
 def create_render(request: Request, payload: RenderRequest) -> RenderAccepted:
     settings, storage, jobs = _state(request)
     upload = storage.get(payload.upload_id)
-    if payload.config.max_tiles > settings.max_tiles:
+    if payload.product_kind == "relief" and payload.mode == "preview":
+        raise ApiError(
+            422,
+            "relief_preview_unavailable",
+            "3D relief preview is not available yet. Generate the final 3MF model instead.",
+        )
+    if isinstance(payload.config, PosterConfig) and payload.config.max_tiles > settings.max_tiles:
         # Server limit is an authoritative cap, not a caller-visible failure.
         config = payload.config.model_copy(update={"max_tiles": settings.max_tiles})
     else:
         config = payload.config
-    job = jobs.submit(upload, payload.mode, config)
+    job = jobs.submit(upload, payload.mode, payload.product_kind, config)
     return RenderAccepted(
         job_id=job.job_id,
         status="queued",

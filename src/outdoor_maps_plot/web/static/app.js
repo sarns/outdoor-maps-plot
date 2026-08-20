@@ -39,6 +39,7 @@
   const state = {
     apiConfig: null,
     defaults: null,
+    reliefDefaults: null,
     selectedFiles: [],
     upload: null,
     job: null,
@@ -188,6 +189,27 @@
     });
   }
 
+  function applyReliefSchemaBounds(schema) {
+    const mapping = {
+      width_mm: "relief-width-mm",
+      depth_mm: "relief-depth-mm",
+      base_thickness_mm: "base-thickness-mm",
+      relief_height_mm: "relief-height-mm",
+      track_width_mm: "track-width-mm",
+      track_height_mm: "track-height-mm",
+      mesh_pitch_mm: "mesh-pitch-mm",
+      padding_percent: "relief-padding-percent",
+    };
+    const properties = schema?.properties || {};
+    Object.entries(mapping).forEach(([field, id]) => {
+      const input = byId(id);
+      const metadata = properties[field] || {};
+      if (metadata.exclusiveMinimum !== undefined) input.min = metadata.exclusiveMinimum;
+      if (metadata.minimum !== undefined) input.min = metadata.minimum;
+      if (metadata.maximum !== undefined) input.max = metadata.maximum;
+    });
+  }
+
   function applyDefaults(defaults) {
     if (!defaults) return;
     byId("use-style-route-color").checked = !defaults.route_color;
@@ -209,11 +231,33 @@
     syncControls();
   }
 
+  function applyReliefDefaults(defaults) {
+    if (!defaults) return;
+    const mapping = {
+      width_mm: "relief-width-mm",
+      depth_mm: "relief-depth-mm",
+      base_thickness_mm: "base-thickness-mm",
+      relief_height_mm: "relief-height-mm",
+      track_width_mm: "track-width-mm",
+      track_height_mm: "track-height-mm",
+      mesh_pitch_mm: "mesh-pitch-mm",
+      padding_percent: "relief-padding-percent",
+      low_color: "terrain-low-color",
+      mid_color: "terrain-mid-color",
+      high_color: "terrain-high-color",
+      track_color: "relief-track-color",
+    };
+    Object.entries(mapping).forEach(([name, id]) => {
+      if (defaults[name] !== undefined) byId(id).value = defaults[name];
+    });
+  }
+
   async function loadConfiguration() {
     try {
       const config = await api("/api/config");
       state.apiConfig = config;
       state.defaults = config.defaults || {};
+      state.reliefDefaults = config.relief_defaults || {};
       const paperSizes = config.paper_sizes || ["A3", "A4", "A2", "LETTER"];
       setSelectOptions(
         byId("paper-size"),
@@ -232,6 +276,7 @@
       }
       setSelectOptions(byId("provider"), providerOptions, state.defaults.provider || "", (item) => item.label);
       applySchemaBounds(config.poster_schema);
+      applyReliefSchemaBounds(config.relief_schema);
       const maxTiles = config.limits?.max_tiles;
       if (maxTiles) byId("max-tiles").max = maxTiles;
       const maxFiles = Math.min(Number(config.limits?.max_files || 15), 15);
@@ -242,6 +287,8 @@
           `Up to ${maxFiles} files · ${formatBytes(maxFileBytes)} each`;
       }
       applyDefaults(state.defaults);
+      applyReliefDefaults(state.reliefDefaults);
+      syncControls();
     } catch (error) {
       state.defaults = collectConfig();
       createStyleCards(FALLBACK_STYLES, "classic");
@@ -431,8 +478,29 @@
     byId("paper-unit").value = match[3].toLowerCase();
   }
 
+  function productKind() {
+    return new FormData(form).get("product_kind") === "relief" ? "relief" : "poster";
+  }
+
   function collectConfig() {
     const data = new FormData(form);
+    if (productKind() === "relief") {
+      return {
+        width_mm: Number(byId("relief-width-mm").value),
+        depth_mm: Number(byId("relief-depth-mm").value),
+        base_thickness_mm: Number(byId("base-thickness-mm").value),
+        relief_height_mm: Number(byId("relief-height-mm").value),
+        track_width_mm: Number(byId("track-width-mm").value),
+        track_height_mm: Number(byId("track-height-mm").value),
+        mesh_pitch_mm: Number(byId("mesh-pitch-mm").value),
+        padding_percent: Number(byId("relief-padding-percent").value),
+        low_color: byId("terrain-low-color").value,
+        mid_color: byId("terrain-mid-color").value,
+        high_color: byId("terrain-high-color").value,
+        track_color: byId("relief-track-color").value,
+        output_format: "3mf",
+      };
+    }
     const paper = byId("paper-size").value === "custom"
       ? `${byId("paper-width").value}x${byId("paper-height").value}${byId("paper-unit").value}`
       : byId("paper-size").value;
@@ -461,8 +529,9 @@
 
   function validateConfig() {
     clearFieldErrors();
-    const invalid = [...form.querySelectorAll(":invalid")];
-    if (byId("paper-size").value === "custom") {
+    const activeOptions = productKind() === "relief" ? byId("relief-options") : byId("poster-options");
+    const invalid = [...activeOptions.querySelectorAll(":invalid")];
+    if (productKind() === "poster" && byId("paper-size").value === "custom") {
       for (const input of [byId("paper-width"), byId("paper-height")]) {
         if (!input.value || Number(input.value) <= 0) invalid.push(input);
       }
@@ -515,7 +584,28 @@
   }
 
   function syncControls() {
+    const relief = productKind() === "relief";
+    byId("poster-options").hidden = relief;
+    byId("relief-options").hidden = !relief;
     const config = collectConfig();
+    if (relief) {
+      byId("relief-padding-output").textContent = `${config.padding_percent}%`;
+      const frame = byId("poster-frame");
+      frame.classList.remove("is-portrait");
+      frame.classList.add("is-landscape");
+      frame.style.aspectRatio = String(config.width_mm / config.depth_mm || 1);
+      frame.dataset.paper = "3D relief";
+      byId("preview-meta").textContent = `${config.width_mm} × ${config.depth_mm} mm · 3MF · four colors`;
+      byId("preview-empty-title").textContent = "3D relief model";
+      byId("preview-empty-detail").textContent = "Preview is not available yet. Generate the final 3MF model.";
+      byId("preview-button-label").textContent = "3D preview unavailable";
+      byId("render-button-label").textContent = "Generate 3D relief";
+      return;
+    }
+    byId("preview-empty-title").textContent = "Your map preview";
+    byId("preview-empty-detail").textContent = "Upload a GPX or FIT file, then refresh the preview.";
+    byId("preview-button-label").textContent = "Refresh preview";
+    byId("render-button-label").textContent = "Generate final poster";
     const useStyleRouteColor = byId("use-style-route-color").checked;
     const paletteMode = config.route_color_mode === "palette";
     const routeColor = byId("route-color");
@@ -565,7 +655,7 @@
   }
 
   function schedulePreview() {
-    if (!state.previewReady || !state.upload || state.busy) return;
+    if (productKind() === "relief" || !state.previewReady || !state.upload || state.busy) return;
     byId("preview-stale").hidden = false;
     clearTimeout(state.previewTimer);
     state.previewTimer = window.setTimeout(() => createRender("preview"), 900);
@@ -574,7 +664,7 @@
   function setBusy(busy) {
     state.busy = busy;
     byId("upload-button").disabled = busy;
-    byId("preview-button").disabled = busy || !state.upload;
+    byId("preview-button").disabled = busy || !state.upload || productKind() === "relief";
     byId("render-button").disabled = busy || !state.upload;
     byId("drop-zone").classList.toggle("is-busy", busy);
     updateReadyState();
@@ -582,18 +672,21 @@
 
   function updateReadyState() {
     const ready = Boolean(state.upload);
-    byId("preview-button").disabled = state.busy || !ready;
+    const relief = productKind() === "relief";
+    byId("preview-button").disabled = state.busy || !ready || relief;
     byId("render-button").disabled = state.busy || !ready;
     document.querySelector(".final-bar").classList.toggle("is-ready", ready && !state.busy);
-    byId("ready-label").textContent = state.busy ? "Poster render in progress" : ready ? "Routes ready to plot" : "Add routes to begin";
+    const product = relief ? "3D relief" : "Poster";
+    byId("ready-label").textContent = state.busy ? `${product} render in progress` : ready ? "Routes ready to plot" : "Add routes to begin";
     byId("ready-detail").textContent = state.busy
       ? "You can safely leave this tab open."
       : ready
-        ? "Preview first, or generate the print-ready poster."
+        ? relief ? "Generate a four-color, print-ready 3MF model." : "Preview first, or generate the print-ready poster."
         : "Your settings will stay here.";
   }
 
   async function createRender(mode) {
+    if (productKind() === "relief" && mode === "preview") return;
     if (!state.upload || state.busy || !validateConfig()) return;
     clearError();
     clearTimeout(state.previewTimer);
@@ -606,6 +699,7 @@
         body: JSON.stringify({
           upload_id: state.upload.upload_id,
           mode,
+          product_kind: productKind(),
           config: collectConfig(),
         }),
       });
@@ -614,7 +708,7 @@
     } catch (error) {
       setBusy(false);
       byId("job-progress").hidden = true;
-      showError(error, mode === "preview" ? "Preview could not start" : "Poster could not start");
+      showError(error, mode === "preview" ? "Preview could not start" : "Map render could not start");
     }
   }
 
@@ -678,7 +772,9 @@
     const phase = String(progress.phase || "queued").replaceAll("_", " ");
     section.hidden = false;
     byId("progress-label").textContent =
-      mode === "preview" ? `Preview · ${titleCase(phase)}` : `Poster · ${titleCase(phase)}`;
+      mode === "preview"
+        ? `Preview · ${titleCase(phase)}`
+        : `${productKind() === "relief" ? "3D relief" : "Poster"} · ${titleCase(phase)}`;
     byId("progress-message").textContent = progress.message || "Working…";
     byId("progress-percent").textContent = `${percent}%`;
     byId("progress-bar").style.width = `${percent}%`;
@@ -719,17 +815,22 @@
     stopJobTracking();
     setBusy(false);
     byId("job-progress").hidden = true;
-    showError(error, "Poster could not be generated");
+    showError(error, `${productKind() === "relief" ? "3D relief" : "Poster"} could not be generated`);
   }
 
   function showResult(status) {
     const artifact = status.artifact;
     state.resultJob = status;
-    byId("result-filename").textContent = artifact.filename || "poster";
+    const relief = status.product_kind === "relief" || productKind() === "relief";
+    byId("result-heading").textContent = relief ? "3D relief ready" : "Poster ready";
+    byId("download-result-label").textContent = relief ? "Download 3MF" : "Download poster";
+    byId("result-filename").textContent = artifact.filename || (relief ? "relief.3mf" : "poster");
     byId("result-format").textContent = (artifact.media_type?.split("/").pop() || collectConfig().output_format).toUpperCase();
     byId("result-size").textContent = formatBytes(artifact.size_bytes);
     byId("result-dimensions").textContent =
-      artifact.dimensions || `${collectConfig().paper_size} · ${titleCase(collectConfig().orientation)}`;
+      artifact.dimensions || (relief
+        ? `${collectConfig().width_mm} × ${collectConfig().depth_mm} mm`
+        : `${collectConfig().paper_size} · ${titleCase(collectConfig().orientation)}`);
     byId("download-result").href = artifact.download_url;
     byId("render-result").hidden = false;
     byId("render-result").focus();
@@ -777,6 +878,21 @@
       route_color_mode: "single",
       output_format: "pdf",
     });
+    applyReliefDefaults(state.reliefDefaults || {
+      width_mm: 240,
+      depth_mm: 240,
+      base_thickness_mm: 2.4,
+      relief_height_mm: 18,
+      track_width_mm: 1.6,
+      track_height_mm: 0.8,
+      mesh_pitch_mm: 0.8,
+      padding_percent: 6,
+      low_color: "#4D6B50",
+      mid_color: "#B88A4A",
+      high_color: "#E8E0CA",
+      track_color: "#E4431B",
+    });
+    syncControls();
     clearFieldErrors();
     byId("validation-summary").hidden = true;
     schedulePreview();
@@ -822,10 +938,12 @@
     byId("reset-options").addEventListener("click", resetOptions);
     form.addEventListener("input", () => {
       syncControls();
+      updateReadyState();
       schedulePreview();
     });
     form.addEventListener("change", () => {
       syncControls();
+      updateReadyState();
       schedulePreview();
     });
     window.addEventListener("beforeunload", () => stopJobTracking());

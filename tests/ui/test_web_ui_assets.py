@@ -86,6 +86,35 @@ def test_every_poster_config_field_is_represented() -> None:
     assert 'radio.name = "style_name"' in (STATIC / "app.js").read_text(encoding="utf-8")
 
 
+def test_ui_exposes_separate_four_color_relief_product() -> None:
+    html = render_index()
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert 'name="product_kind" value="poster"' in html
+    assert 'name="product_kind" value="relief"' in html
+    assert 'id="relief-options"' in html
+    for name in {
+        "width_mm",
+        "depth_mm",
+        "base_thickness_mm",
+        "relief_height_mm",
+        "track_width_mm",
+        "track_height_mm",
+        "mesh_pitch_mm",
+        "low_color",
+        "mid_color",
+        "high_color",
+        "track_color",
+    }:
+        assert f'name="{name}"' in html
+    assert html.count('type="color"', html.index('id="relief-options"')) == 4
+    assert 'max="256"' in html
+    assert 'value="240"' in html
+    assert "product_kind: productKind()" in javascript
+    assert 'output_format: "3mf"' in javascript
+    assert 'mode === "preview"' in javascript
+
+
 def test_ui_has_no_runtime_cdn_and_supports_documented_workflow() -> None:
     html = render_index()
     javascript = (STATIC / "app.js").read_text(encoding="utf-8")

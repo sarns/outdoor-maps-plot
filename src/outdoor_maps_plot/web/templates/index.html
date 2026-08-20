@@ -12,7 +12,7 @@
     <script src="/static/app.js?v={{ static_version }}" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to poster builder</a>
+    <a class="skip-link" href="#main-content">Skip to map builder</a>
 
     <header class="site-header">
       <a class="brand" href="/" aria-label="Outdoor Maps Plot home">
@@ -53,7 +53,7 @@
 
     <main id="main-content" class="page-shell">
       <section class="hero" aria-labelledby="page-title">
-        <p class="eyebrow">GPX + FIT → PRINT-READY TOPOGRAPHIC ART</p>
+        <p class="eyebrow">GPX + FIT → PRINT-READY MAPS</p>
         <h1 id="page-title">Turn the trail into a story.</h1>
         <p>Upload your route, shape the details, and make a map worth hanging onto.</p>
       </section>
@@ -89,8 +89,8 @@
                 <path d="m14 75 22-43 12 20 10-15 24 38H14Z"></path>
                 <path d="M17 69c17-13 27-6 39-19 8-8 16-6 25-1"></path>
               </svg>
-              <strong>Your map preview</strong>
-              <span>Upload a GPX or FIT file, then refresh the preview.</span>
+              <strong id="preview-empty-title">Your map preview</strong>
+              <span id="preview-empty-detail">Upload a GPX or FIT file, then refresh the preview.</span>
             </div>
             <img id="preview-image" alt="Generated poster preview" hidden>
             <span id="preview-stale" class="preview-stale" hidden>Updating preview…</span>
@@ -101,7 +101,7 @@
           </p>
           <button class="button button--secondary button--wide" id="preview-button" type="button" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5l2 2m0-5v5h-5M20 12a8 8 0 0 1-14 5l-2-2m0 5v-5h5"></path></svg>
-            Refresh preview
+            <span id="preview-button-label">Refresh preview</span>
           </button>
 
           {% include "partials/progress.html" %}
@@ -109,13 +109,13 @@
         </aside>
       </div>
 
-      <section class="final-bar" aria-label="Generate poster">
+      <section class="final-bar" aria-label="Generate map output">
         <div>
           <span class="status-dot" aria-hidden="true"></span>
           <p><strong id="ready-label">Add routes to begin</strong><span id="ready-detail">Your settings will stay here.</span></p>
         </div>
         <button class="button button--primary button--large" id="render-button" type="button" disabled>
-          Generate final poster
+          <span id="render-button-label">Generate final poster</span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
         </button>
       </section>
@@ -123,7 +123,7 @@
 
     <footer>
       <p>Outdoor Maps Plot</p>
-      <p>Map areas are requested from your selected tile provider when rendering.</p>
+      <p>Map and elevation areas are requested from their providers when rendering.</p>
     </footer>
   </body>
 </html>

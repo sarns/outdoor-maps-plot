@@ -33,3 +33,13 @@ and usage policy:
 - Esri: <https://www.esri.com/en-us/legal/terms/full-master-agreement>
 - Stadia Maps: <https://stadiamaps.com/terms-of-service/>
 - Thunderforest: <https://www.thunderforest.com/terms/>
+
+## Elevation data
+
+3D relief models use the public Mapzen Terrain Tiles dataset hosted by the AWS
+Open Data program. The tiles combine several regional and global elevation
+sources, each with its own required attribution. Users must retain the
+applicable source credit for the region represented by a generated model.
+
+- Dataset: <https://registry.opendata.aws/terrain-tiles/>
+- Source attribution: <https://github.com/tilezen/joerd/blob/master/docs/attribution.md>

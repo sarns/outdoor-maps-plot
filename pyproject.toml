@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 outdoor-maps-plot = "outdoor_maps_plot.cli:main"
+outdoor-maps-relief = "outdoor_maps_plot.relief_cli:main"
 outdoor-maps-web = "outdoor_maps_plot.web.app:main"
 
 [dependency-groups]
