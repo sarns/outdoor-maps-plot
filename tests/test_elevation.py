@@ -138,3 +138,45 @@ def test_terrarium_decoding_raw_tile_cache_and_limits(tmp_path: Path) -> None:
 def test_terrarium_rejects_unsupported_zoom() -> None:
     with pytest.raises(ElevationError, match="between 0 and 15"):
         TerrariumElevationProvider(zoom=16)
+
+
+def test_terrarium_selects_highest_zoom_within_tile_budget() -> None:
+    request = ElevationRequest(
+        LocalMetricProjection(47.0, 10.0),
+        MetricBounds(-400_000, -400_000, 400_000, 400_000),
+        301,
+        301,
+    )
+    provider = TerrariumElevationProvider(zoom=12, max_tiles=256)
+
+    selected = provider.select_zoom(request)
+
+    assert selected < 12
+    assert provider.tile_count_for(request, selected) <= 256
+    assert provider.tile_count_for(request, selected + 1) > 256
+
+
+def test_terrarium_load_uses_budget_selected_zoom() -> None:
+    image = Image.new("RGB", (256, 256), (128, 0, 0))
+    encoded = io.BytesIO()
+    image.save(encoded, format="PNG")
+    calls: list[str] = []
+
+    def fetch(url: str, _limit: int) -> bytes:
+        calls.append(url)
+        return encoded.getvalue()
+
+    request = ElevationRequest(
+        LocalMetricProjection(47.0, 10.0),
+        MetricBounds(-400_000, -400_000, 400_000, 400_000),
+        3,
+        3,
+    )
+    provider = TerrariumElevationProvider(zoom=12, max_tiles=4, fetcher=fetch)
+    selected = provider.select_zoom(request)
+
+    provider.load(request)
+
+    assert selected < 12
+    assert calls
+    assert all(f"/{selected}/" in url for url in calls)

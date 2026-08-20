@@ -135,7 +135,9 @@ not generate printer-specific G-code. Relief elevation is sampled from the
 public Mapzen Terrain Tiles dataset on AWS and cached locally. Review the
 [Terrain Tiles source attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)
 for the region represented by a generated model. Fetching these tiles reveals
-the approximate route area to the elevation hosting service.
+the approximate route area to the elevation hosting service. For long routes,
+the renderer automatically selects the highest elevation zoom that stays within
+its tile-download safety limit.
 
 ### Raster output
 

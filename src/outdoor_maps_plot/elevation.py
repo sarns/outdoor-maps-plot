@@ -342,7 +342,7 @@ class TerrariumElevationProvider:
     @property
     def cache_identity(self) -> str:
         endpoint = hashlib.sha256(self.url_template.encode("utf-8")).hexdigest()[:12]
-        return f"terrarium:z{self.zoom}:{endpoint}"
+        return f"terrarium:max-z{self.zoom}:{endpoint}"
 
     @property
     def attribution(self) -> str:
@@ -365,13 +365,13 @@ class TerrariumElevationProvider:
             raise ElevationError("Terrarium tile exceeds the download byte limit")
         return data
 
-    def _tile_bytes(self, x: int, y: int) -> bytes:
-        tile_count = 1 << self.zoom
+    def _tile_bytes(self, zoom: int, x: int, y: int) -> bytes:
+        tile_count = 1 << zoom
         x %= tile_count
         if not 0 <= y < tile_count:
             raise ElevationError("Terrarium sample falls outside the Web Mercator tile range")
         cache_path = (
-            self.cache_dir / "terrarium" / str(self.zoom) / str(x) / f"{y}.png"
+            self.cache_dir / "terrarium" / str(zoom) / str(x) / f"{y}.png"
             if self.cache_dir is not None
             else None
         )
@@ -379,7 +379,7 @@ class TerrariumElevationProvider:
             if cache_path.stat().st_size > self.max_tile_bytes:
                 raise ElevationError("cached Terrarium tile exceeds the byte limit")
             return cache_path.read_bytes()
-        url = self.url_template.format(z=self.zoom, x=x, y=y)
+        url = self.url_template.format(z=zoom, x=x, y=y)
         data = self.fetcher(url, self.max_tile_bytes)
         if not data or len(data) > self.max_tile_bytes:
             raise ElevationError("Terrarium tile is empty or exceeds the byte limit")
@@ -396,13 +396,66 @@ class TerrariumElevationProvider:
                     Path(temporary_name).unlink(missing_ok=True)
         return data
 
+    @staticmethod
+    def _world_pixel(latitude: float, longitude: float, zoom: int) -> tuple[float, float]:
+        latitude = min(max(latitude, -85.05112878), 85.05112878)
+        world_pixels = (1 << zoom) * TERRARIUM_TILE_SIZE
+        x = (longitude + 180.0) / 360.0 * world_pixels
+        latitude_radians = math.radians(latitude)
+        y = (1.0 - math.asinh(math.tan(latitude_radians)) / math.pi) / 2.0 * world_pixels
+        return x, y
+
+    def tile_count_for(self, request: ElevationRequest, zoom: int) -> int:
+        """Return a conservative tile count for a request at one zoom level."""
+
+        if not 0 <= zoom <= TERRARIUM_MAX_ZOOM:
+            raise ElevationError(f"Terrarium zoom must be between 0 and {TERRARIUM_MAX_ZOOM}")
+        corners = (
+            request.geo_point(0, 0),
+            request.geo_point(0, request.columns - 1),
+            request.geo_point(request.rows - 1, 0),
+            request.geo_point(request.rows - 1, request.columns - 1),
+        )
+        origin = request.projection.origin_longitude
+        unwrapped_longitudes = [
+            origin + (longitude - origin + 180.0) % 360.0 - 180.0
+            for _latitude, longitude in corners
+        ]
+        latitudes = [latitude for latitude, _longitude in corners]
+        x_values = [
+            self._world_pixel(0.0, longitude, zoom)[0] for longitude in unwrapped_longitudes
+        ]
+        y_values = [self._world_pixel(latitude, 0.0, zoom)[1] for latitude in latitudes]
+
+        # Include the adjacent pixel used by bilinear interpolation. Tile X is
+        # later wrapped at the antimeridian; the span itself remains compact.
+        x_first = math.floor(min(x_values)) // TERRARIUM_TILE_SIZE
+        x_last = (math.floor(max(x_values)) + 1) // TERRARIUM_TILE_SIZE
+        y_first = math.floor(min(y_values)) // TERRARIUM_TILE_SIZE
+        y_last = (math.floor(max(y_values)) + 1) // TERRARIUM_TILE_SIZE
+        tile_count = 1 << zoom
+        columns = min(tile_count, x_last - x_first + 1)
+        rows = min(tile_count, y_last - y_first + 1)
+        return columns * rows
+
+    def select_zoom(self, request: ElevationRequest) -> int:
+        """Choose the highest configured zoom that fits the tile budget."""
+
+        for zoom in range(self.zoom, -1, -1):
+            if self.tile_count_for(request, zoom) <= self.max_tiles:
+                return zoom
+        # Zoom zero is one world tile and therefore always fits a positive
+        # tile budget; retain a defensive error if that invariant changes.
+        raise ElevationError("Terrarium request cannot fit the configured tile limit")
+
     def load(
         self, request: ElevationRequest, *, cancelled: CancelCheck | None = None
     ) -> ElevationGrid:
+        zoom = self.select_zoom(request)
         tiles: dict[tuple[int, int], Image.Image] = {}
 
         def pixel(global_x: int, global_y: int) -> float:
-            tile_count = 1 << self.zoom
+            tile_count = 1 << zoom
             world_pixels = tile_count * TERRARIUM_TILE_SIZE
             global_x %= world_pixels
             global_y = min(max(global_y, 0), world_pixels - 1)
@@ -413,7 +466,7 @@ class TerrariumElevationProvider:
                     raise ElevationError(
                         f"Terrarium request exceeds the {self.max_tiles} tile limit"
                     )
-                raw = self._tile_bytes(*tile_key)
+                raw = self._tile_bytes(zoom, *tile_key)
                 try:
                     with Image.open(io.BytesIO(raw)) as source:
                         if source.size != (TERRARIUM_TILE_SIZE, TERRARIUM_TILE_SIZE):
@@ -427,16 +480,12 @@ class TerrariumElevationProvider:
             return red * 256.0 + green + blue / 256.0 - 32768.0
 
         values: list[tuple[float, ...]] = []
-        world_pixels = (1 << self.zoom) * TERRARIUM_TILE_SIZE
         for row in range(request.rows):
             _check_cancelled(cancelled)
             output_row: list[float] = []
             for column in range(request.columns):
                 latitude, longitude = request.geo_point(row, column)
-                latitude = min(max(latitude, -85.05112878), 85.05112878)
-                x = (longitude + 180.0) / 360.0 * world_pixels
-                latitude_radians = math.radians(latitude)
-                y = (1.0 - math.asinh(math.tan(latitude_radians)) / math.pi) / 2.0 * world_pixels
+                x, y = self._world_pixel(latitude, longitude, zoom)
                 x0, y0 = math.floor(x), math.floor(y)
                 fx, fy = x - x0, y - y0
                 output_row.append(
