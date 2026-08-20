@@ -66,6 +66,28 @@ def test_small_route_uses_higher_resolution_source_tiles(
     assert all(int(url.rsplit("/", 3)[-3]) > 10 for url in requested_urls)
 
 
+def test_tile_limit_error_explains_how_to_recover(tmp_path: Path) -> None:
+    with pytest.raises(PosterError) as captured:
+        poster.make_basemap(
+            [(45.765541, 9.619782), (47.55288, 11.334566)],
+            target_aspect=1.9,
+            cache=tmp_path / "cache",
+            style_name="classic",
+            provider="opentopo",
+            zoom=10,
+            padding=0.06,
+            basemap_width=1200,
+            max_tiles=100,
+        )
+
+    message = str(captured.value)
+    assert "requires" in message
+    assert "Map zoom 10" in message
+    assert "limited to 100" in message
+    assert "Reduce Map zoom from 10 to 9" in message
+    assert "Advanced options" in message
+
+
 def test_line_simplification() -> None:
     points = [(0.0, 0.0), (1.0, 0.01), (2.0, 0.0)]
     assert simplify_line(points, 0.1) == [(0.0, 0.0), (2.0, 0.0)]
