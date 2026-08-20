@@ -147,6 +147,11 @@ def render_relief(
                 "attribution",
                 mapped_water_provider.cache_identity,
             )
+            if not water.complete:
+                warnings.append(
+                    "Some OpenStreetMap water tiles were unavailable; "
+                    "water geometry may be incomplete."
+                )
         except WaterCancelled:
             raise
         except WaterError as exc:

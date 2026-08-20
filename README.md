@@ -143,7 +143,9 @@ its tile-download safety limit.
 Lakes and rivers are loaded as bounded vector geometry from OpenStreetMap via
 public Overpass API instances and cached locally. The renderer tries multiple
 public endpoints; if all are unavailable, it completes without water and reports
-a warning instead of failing the entire 3D export. Rivers are widened to a configurable
+a warning instead of failing the entire 3D export. Large map extents are divided
+into bounded requests; unavailable sections are reported as incomplete water.
+Rivers are widened to a configurable
 minimum printable width (`--waterway-width-mm`, default 1.2 mm). This request
 also reveals the approximate route area to the contacted Overpass services. Areas without
 mapped water produce a valid three-part model without an unused blue body.

@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from outdoor_maps_plot.export_3mf import CORE_NS, MATERIAL_NS, write_3mf
-from outdoor_maps_plot.mesh_validation import validate_relief_model
-from outdoor_maps_plot.relief import build_relief_model
+from outdoor_maps_plot.mesh_validation import validate_mesh, validate_relief_model
+from outdoor_maps_plot.relief import _build_water, _repair_diagonal_contacts, build_relief_model
 from outdoor_maps_plot.relief_options import ReliefConfig
 from outdoor_maps_plot.water import WaterArea, WaterFeatures, WaterLine
 
@@ -54,6 +54,21 @@ def test_builds_exactly_four_watertight_printable_bodies() -> None:
     assert model.width_mm == 100
     assert model.depth_mm == 80
     assert all(body.vertices and body.triangles for body in model.bodies)
+
+
+def test_water_corner_contacts_are_bridged_into_a_manifold_mesh() -> None:
+    mask = _repair_diagonal_contacts([[True, False], [False, True]])
+    water = _build_water(
+        [[2.4, 2.4, 2.4], [2.4, 2.4, 2.4], [2.4, 2.4, 2.4]],
+        mask,
+        20,
+        20,
+        0.4,
+        "#2F75B5",
+    )
+
+    assert water is not None
+    validate_mesh(water)
 
 
 def test_constant_elevation_without_mapped_water_produces_dry_three_part_model() -> None:

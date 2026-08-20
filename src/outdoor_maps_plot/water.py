@@ -51,6 +51,7 @@ class WaterLine:
 class WaterFeatures:
     areas: tuple[WaterArea, ...] = ()
     lines: tuple[WaterLine, ...] = ()
+    complete: bool = True
 
     @property
     def empty(self) -> bool:
@@ -91,9 +92,17 @@ class OpenStreetMapWaterProvider:
         timeout_seconds: float = 30.0,
         max_response_bytes: int = 16 * 1024 * 1024,
         max_coordinates: int = 250_000,
+        max_query_tiles: int = 16,
+        target_tile_span_km: float = 50.0,
         fetcher: WaterFetcher | None = None,
     ) -> None:
-        if timeout_seconds <= 0 or max_response_bytes < 1024 or max_coordinates < 10:
+        if (
+            timeout_seconds <= 0
+            or max_response_bytes < 1024
+            or max_coordinates < 10
+            or not 1 <= max_query_tiles <= 64
+            or target_tile_span_km <= 0
+        ):
             raise WaterError("water provider resource limits must be positive")
         if endpoint is not None and endpoints is not None:
             raise WaterError("configure either one water endpoint or an endpoint list")
@@ -114,6 +123,8 @@ class OpenStreetMapWaterProvider:
         self.timeout_seconds = timeout_seconds
         self.max_response_bytes = max_response_bytes
         self.max_coordinates = max_coordinates
+        self.max_query_tiles = max_query_tiles
+        self.target_tile_span_km = target_tile_span_km
         self.fetcher = fetcher or self._download
 
     @property
@@ -158,36 +169,79 @@ class OpenStreetMapWaterProvider:
     ) -> WaterFeatures:
         _check_cancelled(cancelled)
         south, west, north, east = _geo_bounds(projection, bounds)
-        query = _query(south, west, north, east)
+        include_minor_waterways = bounds.width / width_mm <= 200.0
+        queries = tuple(
+            _query(*tile, include_minor_waterways=include_minor_waterways)
+            for tile in _query_tiles(
+                south,
+                west,
+                north,
+                east,
+                target_span_km=self.target_tile_span_km,
+                max_tiles=self.max_query_tiles,
+            )
+        )
+        areas: list[WaterArea] = []
+        lines: list[WaterLine] = []
+        bytes_used = 0
+        coordinates_used = 0
+        completed_queries = 0
+
+        for query in queries:
+            _check_cancelled(cancelled)
+            try:
+                remaining_bytes = self.max_response_bytes - bytes_used
+                remaining_coordinates = self.max_coordinates - coordinates_used
+                if remaining_bytes < 1024 or remaining_coordinates < 10:
+                    raise WaterError("OpenStreetMap water geometry exceeds the total safety limit")
+                payload = self._load_query(query, remaining_bytes)
+                features, coordinate_count = _parse(
+                    payload,
+                    projection,
+                    bounds,
+                    width_mm,
+                    depth_mm,
+                    minimum_line_width_mm,
+                    remaining_coordinates,
+                    cancelled,
+                )
+            except WaterCancelled:
+                raise
+            except WaterError:
+                continue
+            bytes_used += len(payload)
+            coordinates_used += coordinate_count
+            areas.extend(features.areas)
+            lines.extend(features.lines)
+            completed_queries += 1
+
+        if completed_queries == 0:
+            raise WaterError("could not download OpenStreetMap water geometry for any map tile")
+        return WaterFeatures(
+            tuple(dict.fromkeys(areas)),
+            tuple(dict.fromkeys(lines)),
+            complete=completed_queries == len(queries),
+        )
+
+    def _load_query(self, query: str, remaining_bytes: int) -> bytes:
         cache_key = hashlib.sha256(query.encode("utf-8")).hexdigest()
         cache_path = self.cache_dir / f"{cache_key}.json" if self.cache_dir else None
         if cache_path is not None and cache_path.is_file():
-            if cache_path.stat().st_size > self.max_response_bytes:
+            if cache_path.stat().st_size > remaining_bytes:
                 raise WaterError("cached OpenStreetMap water response exceeds the byte limit")
-            payload = cache_path.read_bytes()
-        else:
-            body = urllib.parse.urlencode({"data": query}).encode("ascii")
-            payload = self._fetch_from_available_endpoint(body)
-            if cache_path is not None:
-                _atomic_cache_write(cache_path, payload)
-        _check_cancelled(cancelled)
-        return _parse(
-            payload,
-            projection,
-            bounds,
-            width_mm,
-            depth_mm,
-            minimum_line_width_mm,
-            self.max_coordinates,
-            cancelled,
-        )
+            return cache_path.read_bytes()
+        body = urllib.parse.urlencode({"data": query}).encode("ascii")
+        payload = self._fetch_from_available_endpoint(body, remaining_bytes)
+        if cache_path is not None:
+            _atomic_cache_write(cache_path, payload)
+        return payload
 
-    def _fetch_from_available_endpoint(self, body: bytes) -> bytes:
+    def _fetch_from_available_endpoint(self, body: bytes, limit: int) -> bytes:
         last_error: WaterError | None = None
         for endpoint in self.endpoints:
             try:
-                payload = self.fetcher(endpoint, body, self.max_response_bytes)
-                if not payload or len(payload) > self.max_response_bytes:
+                payload = self.fetcher(endpoint, body, limit)
+                if not payload or len(payload) > limit:
                     raise WaterError("OpenStreetMap water response is empty or too large")
                 return payload
             except WaterError as exc:
@@ -197,18 +251,68 @@ class OpenStreetMapWaterProvider:
         ) from last_error
 
 
-def _query(south: float, west: float, north: float, east: float) -> str:
+def _query(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    *,
+    include_minor_waterways: bool,
+) -> str:
     bbox = f"{south:.7f},{west:.7f},{north:.7f},{east:.7f}"
+    minor = (
+        f'way["waterway"="stream"]({bbox});way["waterway"="ditch"]({bbox});'
+        f'way["waterway"="drain"]({bbox});'
+        if include_minor_waterways
+        else ""
+    )
     return (
         "[out:json][timeout:25];("
         f'way["natural"="water"]({bbox});relation["natural"="water"]({bbox});'
         f'way["waterway"="riverbank"]({bbox});'
         f'relation["waterway"="riverbank"]({bbox});'
         f'way["landuse"="reservoir"]({bbox});way["landuse"="basin"]({bbox});'
-        f'way["waterway"="river"]({bbox});way["waterway"="stream"]({bbox});'
-        f'way["waterway"="canal"]({bbox});way["waterway"="ditch"]({bbox});'
-        f'way["waterway"="drain"]({bbox});'
-        ");out geom;"
+        f'way["waterway"="river"]({bbox});way["waterway"="canal"]({bbox});'
+        f"{minor}"
+        ");out geom qt;"
+    )
+
+
+def _query_tiles(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    *,
+    target_span_km: float,
+    max_tiles: int,
+) -> tuple[tuple[float, float, float, float], ...]:
+    latitude_km = max((north - south) * 111.32, 0.001)
+    middle_latitude = (south + north) / 2
+    longitude_km = max(
+        (east - west) * 111.32 * max(math.cos(math.radians(middle_latitude)), 0.05),
+        0.001,
+    )
+    rows = max(1, math.ceil(latitude_km / target_span_km))
+    columns = max(1, math.ceil(longitude_km / target_span_km))
+    while rows * columns > max_tiles:
+        if rows >= columns and rows > 1:
+            rows -= 1
+        elif columns > 1:
+            columns -= 1
+        else:
+            break
+    latitude_step = (north - south) / rows
+    longitude_step = (east - west) / columns
+    return tuple(
+        (
+            south + row * latitude_step,
+            west + column * longitude_step,
+            north if row == rows - 1 else south + (row + 1) * latitude_step,
+            east if column == columns - 1 else west + (column + 1) * longitude_step,
+        )
+        for row in range(rows)
+        for column in range(columns)
     )
 
 
@@ -241,7 +345,7 @@ def _parse(
     minimum_line_width_mm: float,
     max_coordinates: int,
     cancelled: CancelCheck | None,
-) -> WaterFeatures:
+) -> tuple[WaterFeatures, int]:
     try:
         document = json.loads(payload)
         elements = document["elements"]
@@ -311,7 +415,7 @@ def _parse(
         elif waterway in {"river", "stream", "canal", "ditch", "drain"}:
             width_m = _numeric_width(tags.get("width"))
             lines.append(WaterLine(points, max(minimum_line_width_mm, width_m * scale)))
-    return WaterFeatures(tuple(areas), tuple(lines))
+    return WaterFeatures(tuple(areas), tuple(lines)), coordinate_count
 
 
 def _numeric_width(value: object) -> float:

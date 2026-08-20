@@ -38,6 +38,12 @@ class UnavailableWaterProvider:
         raise WaterError("test service is offline")
 
 
+class PartialWaterProvider(FakeWaterProvider):
+    def load(self, projection, bounds, **kwargs) -> WaterFeatures:
+        features = super().load(projection, bounds, **kwargs)
+        return WaterFeatures(features.areas, features.lines, complete=False)
+
+
 def _route() -> Route:
     return Route(
         name="Sample",
@@ -103,3 +109,19 @@ def test_render_relief_completes_with_warning_when_water_service_is_offline(
         "OpenStreetMap water was unavailable; the relief was generated without water.",
     )
     assert any("without water" in event.message for event in events)
+
+
+def test_render_relief_reports_partially_available_water(tmp_path: Path) -> None:
+    result = render_relief(
+        [_route()],
+        tmp_path / "relief-with-partial-water.3mf",
+        tmp_path / "cache",
+        ReliefConfig(width_mm=40, depth_mm=40, mesh_pitch_mm=10),
+        elevation_provider=FakeElevationProvider(),
+        water_provider=PartialWaterProvider(),
+    )
+
+    assert result.path.is_file()
+    assert result.warnings == (
+        "Some OpenStreetMap water tiles were unavailable; water geometry may be incomplete.",
+    )

@@ -337,6 +337,29 @@ def _water_mask(
             )
             output_row.append(in_area or near_line)
         mask.append(output_row)
+    return _repair_diagonal_contacts(mask)
+
+
+def _repair_diagonal_contacts(mask: list[list[bool]]) -> list[list[bool]]:
+    """Bridge corner-only cells so the extruded water remains a 2-manifold."""
+
+    if len(mask) < 2 or len(mask[0]) < 2:
+        return mask
+    changed = True
+    while changed:
+        changed = False
+        for row in range(len(mask) - 1):
+            for column in range(len(mask[0]) - 1):
+                top_left = mask[row][column]
+                top_right = mask[row][column + 1]
+                bottom_left = mask[row + 1][column]
+                bottom_right = mask[row + 1][column + 1]
+                if top_left and bottom_right and not top_right and not bottom_left:
+                    mask[row][column + 1] = True
+                    changed = True
+                elif top_right and bottom_left and not top_left and not bottom_right:
+                    mask[row][column] = True
+                    changed = True
     return mask
 
 
