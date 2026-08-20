@@ -5,7 +5,14 @@ from __future__ import annotations
 import math
 from collections import Counter
 
-from outdoor_maps_plot.relief import Mesh, ReliefModel, _cross, _length, _subtract
+from outdoor_maps_plot.relief import (
+    MIN_TRIANGLE_CROSS,
+    Mesh,
+    ReliefModel,
+    _cross,
+    _length,
+    _subtract,
+)
 
 
 class MeshValidationError(ValueError):
@@ -24,7 +31,7 @@ def validate_mesh(mesh: Mesh) -> None:
         if len(set(face)) != 3 or any(index < 0 or index >= len(mesh.vertices) for index in face):
             raise MeshValidationError(f"{mesh.name} contains an invalid triangle index")
         a, b, c = (mesh.vertices[index] for index in face)
-        if _length(_cross(_subtract(b, a), _subtract(c, a))) <= 1e-10:
+        if _length(_cross(_subtract(b, a), _subtract(c, a))) <= MIN_TRIANGLE_CROSS:
             raise MeshValidationError(f"{mesh.name} contains a degenerate triangle")
         edge_counts.update(
             (

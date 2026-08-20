@@ -114,6 +114,36 @@ def test_terrain_split_through_quantized_grid_vertices_remains_manifold() -> Non
     )
 
     validate_relief_model(model)
+
+
+@pytest.mark.parametrize(
+    "elevations",
+    [
+        [
+            [0.0, 0.4999, 0.5000000001],
+            [0.5000001, 0.5001, 0.5000001],
+            [0.499999, 0.4999999, 1.0],
+        ],
+        # The former 1e-10 face cutoff left exactly four unmatched edges.
+        [
+            [0.0, 0.500000001, 0.4999],
+            [0.5001, 0.49999, 0.4999999999],
+            [0.499999, 0.0, 1.0],
+        ],
+    ],
+)
+def test_terrain_split_near_surface_vertices_remains_manifold(
+    elevations: list[list[float]],
+) -> None:
+    """Micrometre-scale contour slivers must weld instead of leaving open edges."""
+
+    model = build_relief_model(
+        elevations,
+        [[(10, 10), (90, 70)]],
+        _config(),
+    )
+
+    validate_relief_model(model)
     assert model.band_heights_mm[0] == pytest.approx(11.4, abs=0.00001)
 
 

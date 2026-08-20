@@ -18,6 +18,14 @@ from outdoor_maps_plot.water import WaterArea, WaterFeatures
 Point2D = tuple[float, float]
 Vertex = tuple[float, float, float]
 Triangle = tuple[int, int, int]
+VERTEX_DECIMALS = 9
+MIN_TRIANGLE_CROSS = 1e-20
+
+
+def _quantize_vertex(value: Vertex) -> Vertex:
+    """Canonicalize shared intersections without changing printable geometry."""
+
+    return tuple(round(float(component), VERTEX_DECIMALS) for component in value)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,20 +58,47 @@ class _MeshBuilder:
 
     def vertex(self, value: Vertex) -> int:
         # Plane intersections reached from adjacent cells must weld exactly.
-        key = tuple(round(float(component), 9) for component in value)
+        key = _quantize_vertex(value)
         if key not in self._indices:
             self._indices[key] = len(self.vertices)
             self.vertices.append(key)
         return self._indices[key]
 
     def triangle(self, a: Vertex, b: Vertex, c: Vertex) -> None:
+        a, b, c = _quantize_vertex(a), _quantize_vertex(b), _quantize_vertex(c)
+        if len({a, b, c}) < 3:
+            return
         cross = _cross(_subtract(b, a), _subtract(c, a))
-        if _length(cross) <= 1e-10:
+        if _length(cross) <= MIN_TRIANGLE_CROSS:
             return
         self.triangles.append((self.vertex(a), self.vertex(b), self.vertex(c)))
 
     def mesh(self, name: str, color: str) -> Mesh:
-        return Mesh(name, color, tuple(self.vertices), tuple(self.triangles))
+        return Mesh(name, color, tuple(self.vertices), _cancel_coincident_faces(self.triangles))
+
+
+def _cancel_coincident_faces(triangles: Sequence[Triangle]) -> tuple[Triangle, ...]:
+    """Remove exact opposite face pairs created by quantized zero-height slivers."""
+
+    groups: dict[tuple[int, int, int], dict[int, list[Triangle]]] = defaultdict(
+        lambda: {1: [], -1: []}
+    )
+    for triangle in triangles:
+        ordered = tuple(sorted(triangle))
+        positions = tuple(ordered.index(vertex) for vertex in triangle)
+        inversions = sum(
+            positions[first] > positions[second]
+            for first in range(2)
+            for second in range(first + 1, 3)
+        )
+        groups[ordered][1 if inversions % 2 == 0 else -1].append(triangle)
+
+    output: list[Triangle] = []
+    for orientations in groups.values():
+        cancelled = min(len(orientations[1]), len(orientations[-1]))
+        output.extend(orientations[1][cancelled:])
+        output.extend(orientations[-1][cancelled:])
+    return tuple(output)
 
 
 def build_relief_model(
@@ -281,14 +316,12 @@ def _clip_above(polygon: list[Vertex], height: float) -> list[Vertex]:
 
 
 def _same_vertex(first: Vertex, second: Vertex) -> bool:
-    return all(
-        math.isclose(a, b, rel_tol=0, abs_tol=1e-9) for a, b in zip(first, second, strict=True)
-    )
+    return _quantize_vertex(first) == _quantize_vertex(second)
 
 
 def _undirected_xy_key(a: Vertex, b: Vertex) -> tuple[Point2D, Point2D]:
-    first = (round(a[0], 9), round(a[1], 9))
-    second = (round(b[0], 9), round(b[1], 9))
+    first = (round(a[0], VERTEX_DECIMALS), round(a[1], VERTEX_DECIMALS))
+    second = (round(b[0], VERTEX_DECIMALS), round(b[1], VERTEX_DECIMALS))
     return tuple(sorted((first, second)))  # type: ignore[return-value]
 
 
